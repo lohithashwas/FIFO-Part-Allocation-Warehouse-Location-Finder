@@ -804,7 +804,7 @@ function downloadExcel() {
     const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
 
     // Helper to generate and download a single workbook
-    const createWorkbook = (fRows, sRows, summaryData, suffix) => {
+    const createWorkbook = (fRows, sRows, summaryData, partMasterData, suffix) => {
       const wb = XLSX.utils.book_new();
 
       // Sheet 1: Fulfilled
@@ -823,10 +823,84 @@ function downloadExcel() {
       const ws4 = buildStyledSheet(summaryData, []);
       XLSX.utils.book_append_sheet(wb, ws4, 'Summary');
 
+      // Sheet 4: Parts Master (Optional, usually for FULL report)
+      if (partMasterData && partMasterData.length > 0) {
+        const pmPri = ['Part Code', 'Part Name', 'Total Shortage Qty', 'Net Status', 'Total In Transit Qty', 'Containers', 'Transit Statuses'];
+        const wsPM = buildStyledSheet(partMasterData, pmPri);
+        XLSX.utils.book_append_sheet(wb, wsPM, 'Shortage Parts Master');
+      }
+
       // Sanitize the suffix to ensure a valid filename
       const safeSuffix = String(suffix).replace(/[^a-z0-9_-]/gi, '_').toUpperCase();
       XLSX.writeFile(wb, `FIFO_Allocation_${safeSuffix}_${stamp}.xlsx`);
     };
+
+    // 0. Build the Complete Part Master List for Shortages
+    const partMasterMap = new Map();
+    state.results.shortages.forEach(r => {
+      const code = String(r['Part Code'] || '').trim();
+      if (!code) return;
+      if (!partMasterMap.has(code)) {
+        partMasterMap.set(code, {
+          'Part Code': code,
+          'Part Name': r['Part Name'],
+          _shortKeys: new Set(),
+          _transitKeys: new Set(),
+          'Total Shortage Qty': 0,
+          'Total In Transit Qty': 0,
+          'Containers': new Set(),
+          'Statuses': new Set()
+        });
+      }
+      
+      const p = partMasterMap.get(code);
+      
+      const shortKey = code + '|' + r['Requested Date'] + '|' + r['Shortage Quantity'] + '|' + r['Destination Location'];
+      if (!p._shortKeys.has(shortKey)) {
+        p._shortKeys.add(shortKey);
+        p['Total Shortage Qty'] += (parseFloat(r['Shortage Quantity']) || 0);
+      }
+      
+      const cont = String(r['Container No.'] || '').trim();
+      const transitQty = parseFloat(r['In Transit Qty']) || 0;
+      if (cont && transitQty > 0) {
+        const transKey = cont + '|' + transitQty;
+        if (!p._transitKeys.has(transKey)) {
+          p._transitKeys.add(transKey);
+          p['Total In Transit Qty'] += transitQty;
+          p['Containers'].add(cont);
+          const stat = String(r['Container Status'] || '').trim();
+          if (stat) p['Statuses'].add(stat);
+        }
+      }
+    });
+
+    const partMasterList = Array.from(partMasterMap.values()).map(p => {
+      const netShort = Math.max(0, p['Total Shortage Qty'] - p['Total In Transit Qty']);
+      let netStatus = '';
+      if (p['Total In Transit Qty'] === 0) netStatus = `Absolute Shortage`;
+      else if (netShort === 0) netStatus = `Fully Covered`;
+      else netStatus = `Partial Shortage (${netShort} missing)`;
+
+      return {
+        'Part Code': p['Part Code'],
+        'Part Name': p['Part Name'],
+        'Total Shortage Qty': p['Total Shortage Qty'],
+        'Net Status': netStatus,
+        'Total In Transit Qty': p['Total In Transit Qty'],
+        'Containers': Array.from(p['Containers']).join(', '),
+        'Transit Statuses': Array.from(p['Statuses']).join(', ')
+      };
+    });
+
+    // 0.5. Download standalone PARTS MASTER file
+    setTimeout(() => {
+      const wbParts = XLSX.utils.book_new();
+      const pmPri = ['Part Code', 'Part Name', 'Total Shortage Qty', 'Net Status', 'Total In Transit Qty', 'Containers', 'Transit Statuses'];
+      const wsParts = buildStyledSheet(partMasterList.length ? partMasterList : [{ Note: 'No shortages.' }], pmPri);
+      XLSX.utils.book_append_sheet(wbParts, wsParts, 'Shortage Parts Master');
+      XLSX.writeFile(wbParts, `FIFO_Allocation_PARTS_MASTER_${stamp}.xlsx`);
+    }, 100);
 
     // 1. Identify all unique Destination Locations
     const locations = new Set();
@@ -930,10 +1004,12 @@ function downloadExcel() {
     });
 
     // 4. Download the FULL Master Report
-    createWorkbook(state.results.fulfilled, state.results.shortages, fullSummaryRows, 'FULL');
+    setTimeout(() => {
+      createWorkbook(state.results.fulfilled, state.results.shortages, fullSummaryRows, partMasterList, 'FULL');
+    }, 400);
 
     // 5. Generate and download a separate file for each unique location
-    let delay = 300;
+    let delay = 700;
     locations.forEach(loc => {
       setTimeout(() => {
         const fRows = state.results.fulfilled.filter(r => String(r['Destination Location'] || '').trim() === loc);
@@ -952,12 +1028,12 @@ function downloadExcel() {
           'Generated At': new Date().toLocaleString()
         }];
 
-        createWorkbook(fRows, sRows, locSummaryRow, loc);
+        createWorkbook(fRows, sRows, locSummaryRow, null, loc);
       }, delay);
       delay += 400; // Stagger downloads slightly to prevent browser blocking
     });
 
-    showToast(`Downloading FULL report + ${locations.size} location reports...`, 'success', 5000);
+    showToast(`Downloading ALL reports (Full, Parts Master, and ${locations.size} locations)...`, 'success', 6000);
   } catch (err) {
     showToast(`Export error: ${err.message}`, 'error');
     console.error(err);
