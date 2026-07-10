@@ -849,7 +849,6 @@ function downloadExcel() {
       let locUnitsAlloc = 0;
       let locUnitsShort = 0;
       let locUnitsReq = 0;
-      let locUnitsTransit = 0;
       
       const seenReqs = new Set();
       fRows.forEach(r => {
@@ -862,8 +861,12 @@ function downloadExcel() {
       });
       
       const uniqueShortages = new Set();
+      const partsInTransitSet = new Set();
+      
       sRows.forEach(r => {
-        locUnitsTransit += (parseFloat(r['In Transit Qty']) || 0);
+        if (parseFloat(r['In Transit Qty']) > 0) {
+          partsInTransitSet.add(r['Part Code']);
+        }
         
         const shortKey = r['Part Code'] + '|' + r['Requested Date'] + '|' + r['Shortage Quantity'];
         if (!uniqueShortages.has(shortKey)) {
@@ -885,14 +888,16 @@ function downloadExcel() {
         unitsReq: locUnitsReq,
         unitsAlloc: locUnitsAlloc,
         unitsShort: locUnitsShort,
-        unitsTransit: locUnitsTransit
+        partsTransit: partsInTransitSet.size
       });
     });
 
     // 3. Build multi-row Summary for the FULL report
-    let overallUnitsTransit = 0;
+    const overallPartsInTransit = new Set();
     state.results.shortages.forEach(r => {
-      overallUnitsTransit += (parseFloat(r['In Transit Qty']) || 0);
+      if (parseFloat(r['In Transit Qty']) > 0) {
+        overallPartsInTransit.add(r['Part Code']);
+      }
     });
 
     const fullSummaryRows = [
@@ -904,7 +909,7 @@ function downloadExcel() {
         'Units Requested': state.results.summary.unitsReq,
         'Units Allocated': state.results.summary.unitsAlloc,
         'Units Short': state.results.summary.unitsShort,
-        'Units In Transit': overallUnitsTransit,
+        'Parts In Transit': overallPartsInTransit.size,
         'Generated At': new Date().toLocaleString()
       }
     ];
@@ -919,7 +924,7 @@ function downloadExcel() {
         'Units Requested': s.unitsReq,
         'Units Allocated': s.unitsAlloc,
         'Units Short': s.unitsShort,
-        'Units In Transit': s.unitsTransit,
+        'Parts In Transit': s.partsTransit,
         'Generated At': ''
       });
     });
@@ -943,7 +948,7 @@ function downloadExcel() {
           'Units Requested': s.unitsReq,
           'Units Allocated': s.unitsAlloc,
           'Units Short': s.unitsShort,
-          'Units In Transit': s.unitsTransit,
+          'Parts In Transit': s.partsTransit,
           'Generated At': new Date().toLocaleString()
         }];
 
