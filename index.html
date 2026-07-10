@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WareFlow – FIFO Part Allocation & Warehouse Location Finder</title>
+  <meta name="description" content="Warehouse FIFO part allocation system. Upload Part Request List, Consolidated Inventory and Container List to generate pick instructions and identify shortages.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ── NAVBAR ── -->
+<nav class="navbar" id="navbar">
+  <div class="nav-content">
+    <div class="nav-brand">
+      <div class="nav-icon">
+        <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+          <path d="M2 7h18M2 11h12M2 15h14" stroke="white" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="18" cy="15" r="3" fill="#22C55E" stroke="white" stroke-width="1.5"/>
+        </svg>
+      </div>
+      <div>
+        <div class="nav-title">WareFlow</div>
+        <div class="nav-subtitle">FIFO Allocation Engine</div>
+      </div>
+    </div>
+    <span class="nav-badge">v1.0</span>
+  </div>
+</nav>
+
+<!-- ── HERO ── -->
+<section class="hero">
+  <div class="hero-content">
+    <div class="hero-tag"><span class="hero-tag-dot"></span>Warehouse Operations Tool</div>
+    <h1 class="hero-title">FIFO Part Allocation<br>&amp; Location Finder</h1>
+    <p class="hero-desc">Upload your three warehouse files below. The system matches part requests against available stock using strict First-In-First-Out logic, identifies exact pick locations, and flags any shortages.</p>
+    <div class="hero-steps">
+      <div class="hero-step"><span class="step-num">1</span>Upload Files</div>
+      <div class="hero-step-arrow">→</div>
+      <div class="hero-step"><span class="step-num">2</span>Process FIFO</div>
+      <div class="hero-step-arrow">→</div>
+      <div class="hero-step"><span class="step-num">3</span>Download Report</div>
+    </div>
+  </div>
+</section>
+
+<!-- ── UPLOAD SECTION ── -->
+<div class="section" id="upload-section">
+  <div class="section-header">
+    <h2>Upload Your Files</h2>
+    <p>All three files are required. Only .xlsx format accepted. Drag &amp; drop or click to browse.</p>
+  </div>
+  <div class="upload-grid">
+
+    <!-- Card 1: Part Request List -->
+    <div class="upload-card" id="card-request">
+      <div class="upload-card-header">
+        <div class="upload-card-num">1</div>
+        <div class="upload-card-info">
+          <h3>Part Request List</h3>
+          <p>Demand file — all part requirements</p>
+        </div>
+      </div>
+      <div class="drop-zone" id="drop-request" onclick="document.getElementById('file-request').click()">
+        <input type="file" id="file-request" accept=".xlsx" hidden>
+        <div class="dz-icon">
+          <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
+            <path d="M18 6v20M18 6L12 12M18 6L24 12" stroke="#0A1F44" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" opacity=".5"/>
+            <path d="M6 30h24" stroke="#0A1F44" stroke-width="2.5" stroke-linecap="round" opacity=".5"/>
+          </svg>
+        </div>
+        <p class="dz-text"><strong>Click to upload</strong> or drag &amp; drop</p>
+        <p class="dz-hint">Part Code, Part Name, Quantity, Requested Date …</p>
+      </div>
+      <div class="file-preview" id="fp-request">
+        <span class="fp-icon">✅</span>
+        <span class="fp-name" id="fp-request-name">—</span>
+        <span class="fp-rows" id="fp-request-rows"></span>
+        <button class="fp-remove" onclick="removeFile('request')" title="Remove">✕</button>
+      </div>
+      <div class="card-error" id="err-request"></div>
+    </div>
+
+    <!-- Card 2: Consolidated Inventory -->
+    <div class="upload-card" id="card-inventory">
+      <div class="upload-card-header">
+        <div class="upload-card-num">2</div>
+        <div class="upload-card-info">
+          <h3>Consolidated Inventory</h3>
+          <p>Supply Pool 1 — warehouse stock</p>
+        </div>
+      </div>
+      <div class="drop-zone" id="drop-inventory" onclick="document.getElementById('file-inventory').click()">
+        <input type="file" id="file-inventory" accept=".xlsx" hidden>
+        <div class="dz-icon">
+          <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
+            <rect x="6" y="8" width="24" height="20" rx="2" stroke="#0A1F44" stroke-width="2.5" opacity=".5"/>
+            <path d="M6 14h24" stroke="#0A1F44" stroke-width="2" opacity=".5"/>
+            <path d="M12 20h4M12 24h8" stroke="#0A1F44" stroke-width="2" stroke-linecap="round" opacity=".4"/>
+          </svg>
+        </div>
+        <p class="dz-text"><strong>Click to upload</strong> or drag &amp; drop</p>
+        <p class="dz-hint">Part Code, Order Date, Location, Type Location, Blocked …</p>
+      </div>
+      <div class="file-preview" id="fp-inventory">
+        <span class="fp-icon">✅</span>
+        <span class="fp-name" id="fp-inventory-name">—</span>
+        <span class="fp-rows" id="fp-inventory-rows"></span>
+        <button class="fp-remove" onclick="removeFile('inventory')" title="Remove">✕</button>
+      </div>
+      <div class="card-error" id="err-inventory"></div>
+    </div>
+
+    <!-- Card 3: Container List Case Details -->
+    <div class="upload-card" id="card-container">
+      <div class="upload-card-header">
+        <div class="upload-card-num">3</div>
+        <div class="upload-card-info">
+          <h3>Container List Case Details</h3>
+          <p>Supply Pool 2 — in-transit / at-port stock</p>
+        </div>
+      </div>
+      <div class="drop-zone" id="drop-container" onclick="document.getElementById('file-container').click()">
+        <input type="file" id="file-container" accept=".xlsx" hidden>
+        <div class="dz-icon">
+          <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
+            <rect x="4" y="10" width="28" height="18" rx="2" stroke="#0A1F44" stroke-width="2.5" opacity=".5"/>
+            <path d="M4 16h28" stroke="#0A1F44" stroke-width="2" opacity=".4"/>
+            <path d="M13 10V8M23 10V8" stroke="#0A1F44" stroke-width="2.5" stroke-linecap="round" opacity=".4"/>
+          </svg>
+        </div>
+        <p class="dz-text"><strong>Click to upload</strong> or drag &amp; drop</p>
+        <p class="dz-hint">Part No, Order Date, Case No, Status, Container Location …</p>
+      </div>
+      <div class="file-preview" id="fp-container">
+        <span class="fp-icon">✅</span>
+        <span class="fp-name" id="fp-container-name">—</span>
+        <span class="fp-rows" id="fp-container-rows"></span>
+        <button class="fp-remove" onclick="removeFile('container')" title="Remove">✕</button>
+      </div>
+      <div class="card-error" id="err-container"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── ACTION BAR ── -->
+<div class="action-bar" id="action-bar">
+  <button class="btn btn-primary btn-lg" id="process-btn" onclick="processFiles()" disabled>
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 9l4 4 8-8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    Process &amp; Allocate
+  </button>
+  <span id="upload-status" style="font-size:.85rem;color:var(--grey-text)">Upload all 3 files to continue</span>
+</div>
+
+<!-- ── LOADING ── -->
+<div class="loading-overlay" id="loading-overlay" hidden>
+  <div class="loading-card">
+    <div class="spinner"></div>
+    <div class="loading-title">Running FIFO Allocation…</div>
+    <div class="loading-sub" id="loading-sub">Reading files and building supply pool</div>
+  </div>
+</div>
+
+<!-- ── RESULTS ── -->
+<div class="results-section" id="results-section" hidden>
+
+  <!-- Summary Cards -->
+  <div class="summary-grid" id="summary-grid">
+    <div class="stat-card">
+      <div class="stat-label">Total Requests</div>
+      <div class="stat-value" id="stat-total">—</div>
+      <div class="stat-sub">rows processed</div>
+    </div>
+    <div class="stat-card green">
+      <div class="stat-label">Fully Fulfilled</div>
+      <div class="stat-value" id="stat-fulfilled">—</div>
+      <div class="stat-sub">warehouse stock</div>
+    </div>
+    <div class="stat-card red">
+      <div class="stat-label">Shortages</div>
+      <div class="stat-value" id="stat-shortage">—</div>
+      <div class="stat-sub">requests with gap</div>
+    </div>
+    <div class="stat-card" style="border-left-color:#2563EB">
+      <div class="stat-label">In Transit Available</div>
+      <div class="stat-value" id="stat-intransit" style="color:#2563EB">—</div>
+      <div class="stat-sub">short parts found in containers</div>
+    </div>
+    <div class="stat-card orange">
+      <div class="stat-label">Units Short</div>
+      <div class="stat-value" id="stat-units-short">—</div>
+      <div class="stat-sub">total shortage qty</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Units Requested</div>
+      <div class="stat-value" id="stat-units-req">—</div>
+      <div class="stat-sub">total demand</div>
+    </div>
+    <div class="stat-card green">
+      <div class="stat-label">Units Allocated</div>
+      <div class="stat-value" id="stat-units-alloc">—</div>
+      <div class="stat-sub">total supply used</div>
+    </div>
+  </div>
+
+  <!-- Results Table Card -->
+  <div class="results-card">
+    <div class="tabs">
+      <button class="tab-btn active" id="tab-fulfilled" onclick="switchTab('fulfilled')">
+        ✅ Fulfilled Allocations
+        <span class="tab-count" id="tc-fulfilled">0</span>
+      </button>
+      <button class="tab-btn" id="tab-shortages" onclick="switchTab('shortages')">
+        ⚠️ Shortages & In-Transit
+        <span class="tab-count" id="tc-shortages">0</span>
+      </button>
+    </div>
+
+    <!-- Fulfilled Tab -->
+    <div class="tab-panel active" id="panel-fulfilled">
+      <div class="table-wrapper">
+        <table class="data-table" id="table-fulfilled">
+          <thead>
+            <tr>
+              <th>Part Code</th>
+              <th>Part Name</th>
+              <th>Req. Qty</th>
+              <th>Requested Date</th>
+              <th>Destination</th>
+              <th>Source</th>
+              <th>Pick Location</th>
+              <th>Batch Order Date</th>
+              <th>Allocated Qty</th>
+              <th>Running Total</th>
+              <th>Status</th>
+              <th>Case No</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-fulfilled"></tbody>
+        </table>
+      </div>
+      <div class="table-footer" id="footer-fulfilled"></div>
+    </div>
+
+    <!-- Shortages Tab -->
+    <div class="tab-panel" id="panel-shortages">
+      <div class="table-wrapper">
+        <table class="data-table" id="table-shortages">
+          <thead>
+            <tr>
+              <th>Part Code</th>
+              <th>Part Name</th>
+              <th>Req Qty</th>
+              <th>Allocated</th>
+              <th>Shortage Qty</th>
+              <th>Net Status</th>
+              <th>Container No.</th>
+              <th>Transit Qty</th>
+              <th>Cont. Status</th>
+              <th>ETA</th>
+              <th>Destination</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-shortages"></tbody>
+        </table>
+      </div>
+      <div class="table-footer" id="footer-shortages"></div>
+    </div>
+  </div>
+
+  <!-- Download Bar -->
+  <div class="download-bar">
+    <div class="download-info">
+      <h3>Results Ready</h3>
+      <p>Multi-sheet Excel: Fulfilled (warehouse), Shortages & In-Transit, Summary.</p>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="btn btn-outline" onclick="resetAll()">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 8a6 6 0 1 0 1.5-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M2 4v4h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        New Batch
+      </button>
+      <button class="btn btn-success btn-lg" id="download-btn" onclick="downloadExcel()">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 3v9M9 12L5 8M9 12L13 8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 15h12" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>
+        Download Excel Report
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast Container -->
+<div class="toast-container" id="toast-container"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
