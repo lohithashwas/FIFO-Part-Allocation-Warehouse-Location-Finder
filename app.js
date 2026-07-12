@@ -417,9 +417,10 @@ function runFIFO(requests, pool) {
     const requestedQty = parseFloat(req['Quantity']) || 0;
     const partName = String(req['Part Name'] || '').trim();
     const reqDate  = req['Requested Date'];
+    const destLoc  = String(req['Destination Location'] || '').trim();
     // The user clarified that the column labeled 'Destination Location' in the 
     // Request Excel actually specifies the strict Source Location to pull from.
-    const reqSourceLoc  = String(req['Source Location'] || req['Destination Location'] || '').trim();
+    const reqSourceLoc  = String(req['Source Location'] || destLoc).trim();
 
     let batches = pool.get(partCode) || [];
 
