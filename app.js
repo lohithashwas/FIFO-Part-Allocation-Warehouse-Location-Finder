@@ -243,8 +243,11 @@ function buildSupplyPool(inventoryRows, containerRows) {
     // (It will be picked up by the shortage cross-check instead)
     if (isTransitOrPort) continue;
 
-    const pickLoc = [caseNo ? `Case: ${caseNo}` : '', status ? `Status: ${status}` : '', destuff ? `Destuff: ${destuff}` : '']
-                    .filter(Boolean).join(' | ') || contLoc || 'Container';
+    // Build pick location: prefer physical location, append case/status/destuff detail
+    const physLoc = loc || contLoc || 'Container Yard';
+    const pickDetail = [caseNo ? `Case: ${caseNo}` : '', status ? `Status: ${status}` : '', destuff ? `Destuff: ${destuff}` : '']
+                       .filter(Boolean).join(' | ');
+    const pickLoc = pickDetail ? `${physLoc} | ${pickDetail}` : physLoc;
 
     addBatch(code, {
       source:      'Container',
@@ -388,10 +391,16 @@ function runFIFO(requests, pool) {
       totalAllocated += allocate;
       runningTotal += allocate;
 
+      // Resolve the human-readable warehouse / location label
+      const warehouseLabel = batch.location
+        ? batch.location
+        : (batch.source === 'Container' ? 'Container Yard' : batch.source);
+
       fulfilled.push({
         'Container No.':                 batch.source === 'Container' ? (batch.containerNo || batch.caseNo) : '',
         'Type':                          batch.type || batch.source,
         'Case No':                          batch.caseNo,
+        'Warehouse / Location':             warehouseLabel,
         'Destination Location':             destLoc,
         'Pick Location':                    batch.pickLoc,
         'Batch Order Date':                 formatDate(batch.orderDate),
@@ -573,6 +582,7 @@ function renderTable(type, rows) {
         <td>${fmt(row['Requested Quantity'])}</td>
         <td>${esc(row['Requested Date'])}</td>
         <td>${esc(row['Destination Location'])}</td>
+        <td style="font-weight:600;color:var(--navy)">${esc(row['Warehouse / Location'])}</td>
         <td>${srcBadge}</td>
         <td>${esc(row['Pick Location'])}</td>
         <td>${esc(row['Batch Order Date'])}</td>
@@ -596,7 +606,7 @@ function renderTable(type, rows) {
 
         const sep = document.createElement('tr');
         sep.className = `group-separator ${sepClass}`;
-        sep.innerHTML = `<td colspan="12">
+        sep.innerHTML = `<td colspan="13">
           <div class="group-summary">
             <span class="gs-part">📦 ${esc(row['Part Code'])} &nbsp;·&nbsp; ${row._batchTotal} batches</span>
             <span class="gs-item">Requested: <strong>${fmt(reqQty)}</strong></span>
@@ -658,6 +668,7 @@ const PRIORITY_COLS = [
   'Container No.',
   'Type',
   'Case No',
+  'Warehouse / Location',
   'Destination Location',
   'Pick Location',
   'Batch Order Date',
@@ -980,9 +991,6 @@ function downloadExcel() {
         'Requests Processed': state.results.summary.totalReqs,
         'Fully Fulfilled': state.results.summary.fulfilledFull,
         'Shortage Count': state.results.summary.shortageCount,
-        'Units Requested': state.results.summary.unitsReq,
-        'Units Allocated': state.results.summary.unitsAlloc,
-        'Units Short': state.results.summary.unitsShort,
         'Parts In Transit': overallPartsInTransit.size,
         'Generated At': new Date().toLocaleString()
       }
@@ -995,9 +1003,6 @@ function downloadExcel() {
         'Requests Processed': s.totalReqs,
         'Fully Fulfilled': s.fulfilledFull,
         'Shortage Count': s.shortageCount,
-        'Units Requested': s.unitsReq,
-        'Units Allocated': s.unitsAlloc,
-        'Units Short': s.unitsShort,
         'Parts In Transit': s.partsTransit,
         'Generated At': ''
       });
@@ -1021,9 +1026,6 @@ function downloadExcel() {
           'Requests Processed': s.totalReqs,
           'Fully Fulfilled': s.fulfilledFull,
           'Shortage Count': s.shortageCount,
-          'Units Requested': s.unitsReq,
-          'Units Allocated': s.unitsAlloc,
-          'Units Short': s.unitsShort,
           'Parts In Transit': s.partsTransit,
           'Generated At': new Date().toLocaleString()
         }];
