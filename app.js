@@ -418,11 +418,18 @@ function runFIFO(requests, pool) {
     const partName = String(req['Part Name'] || '').trim();
     const reqDate  = req['Requested Date'];
 
+    // Helper to safely grab column values even if Excel headers have trailing spaces
+    const getVal = (row, colName) => {
+      const target = colName.toLowerCase();
+      const key = Object.keys(row).find(k => k.trim().toLowerCase() === target);
+      return key ? row[key] : undefined;
+    };
+
     // In the user's Request Excel, the headers are inverted:
     // 'Destination Location' = The physical warehouse to pull from (KD1 WAREHOUSE, CONT YARD)
     // 'Source Location' = The assembly line where the parts are going (JOBORDER P1)
-    const warehouseToPullFrom = String(req['Destination Location'] || '').trim();
-    const assemblyLineGoingTo = String(req['Source Location'] || '').trim();
+    const warehouseToPullFrom = String(getVal(req, 'Destination Location') || '').trim();
+    const assemblyLineGoingTo = String(getVal(req, 'Source Location') || '').trim();
 
     let batches = pool.get(partCode) || [];
 
