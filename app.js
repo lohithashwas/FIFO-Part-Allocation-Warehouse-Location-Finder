@@ -186,10 +186,59 @@ function buildSupplyPool(inventoryRows, containerRows) {
     pool.get(partCode).push(batch);
   };
 
-  // 1. ── Containers (Processed FIRST to map Case No -> C/T No) ──
-  let lastContainerNo = '';
-  const caseToCtMap = new Map();
+  // Resolve the actual C/T No column name dynamically for INVENTORY sheet
+  const _normInvKey = (k) => k.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+  const _ctNoInvKey = inventoryRows.length > 0
+    ? (Object.keys(inventoryRows[0]).find(k => {
+        const n = _normInvKey(k);
+        return n === 'CTNO' || n === 'CONTAINERNO' || n === 'CONTAINERNUM';
+      }) || null)
+    : null;
 
+  const _getInvCtNo = (row) => _ctNoInvKey ? String(row[_ctNoInvKey] || '').trim() : String(
+    row['C/T No'] || row['C/T No.'] || row['C/T NO'] || row['CT No'] ||
+    row['Container No'] || row['Container No.'] || row['Container Number'] || ''
+  ).trim();
+
+  // Inventory
+  let lastInvContainerNo = '';
+  for (const row of inventoryRows) {
+    // Forward-fill C/T No for Inventory BEFORE skip checks
+    // (in case Inventory sheet also uses group headers or merged cells for C/T No)
+    const rawInvContainerNo = _getInvCtNo(row);
+    if (rawInvContainerNo) lastInvContainerNo = rawInvContainerNo;
+    const invContainerNo = lastInvContainerNo;
+
+    const code = String(row['Part Code'] || '').trim();
+    if (!code) continue;
+    // Exclude blocked rows
+    const blocked = row['Blocked'];
+    if (blocked === true || blocked === 1 || String(blocked).toUpperCase() === 'TRUE') continue;
+    const qty = parseFloat(row['Quantity']) || 0;
+    if (qty <= 0) continue;
+
+    addBatch(code, {
+      source:      'Inventory',
+      orderDate:   parseExcelDate(row['Order Date']),
+      remaining:   qty,
+      location:    String(row['Location'] || '').trim(),
+      pickLoc:     String(row['Type Location'] || row['Location'] || '').trim(),
+      caseNo:      String(row['Case No'] || '').trim(),
+      containerNo: invContainerNo,
+      refNo:       String(row['Order No'] || '').trim(),
+      plant:       String(row['Plant'] || '').trim(),
+      partName:    String(row['Part Name'] || '').trim(),
+      type:        String(row['Type'] || row['Pack Type'] || row['Packing Type'] || row['Packing'] || '').trim()
+    });
+  }
+
+  // ── Containers
+  // Add containers to FIFO pool UNLESS they are 'In Transit' or 'At Port'
+  let lastContainerNo = '';
+
+  // Resolve the actual C/T No column name dynamically.
+  // Strip ALL non-alphanumeric chars so C/T No, C/T No., C\u2215T No, BOM+C/T No
+  // all normalise to CTNO and match correctly.
   const _normKey = (k) => k.replace(/[^A-Z0-9]/gi, '').toUpperCase();
   const _ctNoKey = containerRows.length > 0
     ? (Object.keys(containerRows[0]).find(k => {
@@ -204,30 +253,35 @@ function buildSupplyPool(inventoryRows, containerRows) {
   ).trim();
 
   for (const row of containerRows) {
+    // ── Forward-fill C/T No FIRST, before any skip checks ──────────────────
+    // The C/T No value often sits only on a group-header row that has no Part No.
+    // We must capture it even if that row is skipped for other reasons.
     const rawContainerNo = _getCtNo(row);
     if (rawContainerNo) lastContainerNo = rawContainerNo;
     const containerNo = lastContainerNo;
-    const caseNo = String(row['Case No'] || '').trim();
-
-    // Build cross-reference map so Inventory rows can lookup their original Container No
-    if (caseNo && containerNo) {
-      caseToCtMap.set(caseNo, containerNo);
-    }
+    // ───────────────────────────────────────────────────────────────────────
 
     const code = String(row['Part No'] || '').trim();
     if (!code) continue;
     const qty = parseFloat(row['Quantity']) || 0;
     if (qty <= 0) continue;
 
+    const caseNo  = String(row['Case No'] || '').trim();
     const status   = String(row['Status'] || '').trim();
     const destuff  = String(row['Destuff Status'] || '').trim();
     const contLoc  = String(row['Container Location'] || '').trim();
+    // The physical location for containers is 'Container Location' or 'Container Yard'.
     const physLoc  = contLoc || 'Container Yard';
 
+    // Is this container still in transit or at the port? (Check ONLY the Status column)
     const statusUpper = status.toUpperCase();
     const isTransitOrPort = statusUpper.includes('TRANSIT') || statusUpper.includes('PORT');
+
+    // If it's in transit/port, skip adding it to the available FIFO pool
+    // (It will be picked up by the shortage cross-check instead)
     if (isTransitOrPort) continue;
 
+    // Build pick location: physical location + case/status/destuff detail
     const pickDetail = [caseNo ? `Case: ${caseNo}` : '', status ? `Status: ${status}` : '', destuff ? `Destuff: ${destuff}` : '']
                        .filter(Boolean).join(' | ');
     const pickLoc = pickDetail ? `${physLoc} | ${pickDetail}` : physLoc;
@@ -236,64 +290,15 @@ function buildSupplyPool(inventoryRows, containerRows) {
       source:      'Container',
       orderDate:   parseExcelDate(row['Order Date']),
       remaining:   qty,
-      location:    physLoc,
+      location:    physLoc,        // Container Location or 'Container Yard'
       pickLoc,
       status,
       caseNo,
-      containerNo,
+      containerNo,                 // Forward-filled from C/T No
       refNo:       String(row['Invoice No'] || '').trim(),
       portETA:     String(row['Port ETA'] || '').trim(),
       portATA:     String(row['Port ATA'] || '').trim(),
       destuffStatus: destuff,
-      partName:    String(row['Part Name'] || '').trim(),
-      type:        String(row['Type'] || row['Pack Type'] || row['Packing Type'] || row['Packing'] || '').trim()
-    });
-  }
-
-  // 2. ── Inventory (Processed SECOND to use the Container lookup map) ──
-  const _normInvKey = (k) => k.replace(/[^A-Z0-9]/gi, '').toUpperCase();
-  const _ctNoInvKey = inventoryRows.length > 0
-    ? (Object.keys(inventoryRows[0]).find(k => {
-        const n = _normInvKey(k);
-        return n === 'CTNO' || n === 'CONTAINERNO' || n === 'CONTAINERNUM';
-      }) || null)
-    : null;
-
-  const _getInvCtNo = (row) => _ctNoInvKey ? String(row[_ctNoInvKey] || '').trim() : String(
-    row['C/T No'] || row['C/T No.'] || row['C/T NO'] || row['CT No'] ||
-    row['Container No'] || row['Container No.'] || row['Container Number'] || ''
-  ).trim();
-
-  let lastInvContainerNo = '';
-  for (const row of inventoryRows) {
-    const rawInvContainerNo = _getInvCtNo(row);
-    if (rawInvContainerNo) lastInvContainerNo = rawInvContainerNo;
-    let invContainerNo = lastInvContainerNo;
-    const caseNo = String(row['Case No'] || '').trim();
-
-    // CROSS-REFERENCE LOOKUP: If inventory row doesn't have a C/T No natively,
-    // get it from the Container List using the Case No!
-    if (!invContainerNo && caseNo && caseToCtMap.has(caseNo)) {
-      invContainerNo = caseToCtMap.get(caseNo);
-    }
-
-    const code = String(row['Part Code'] || '').trim();
-    if (!code) continue;
-    const blocked = row['Blocked'];
-    if (blocked === true || blocked === 1 || String(blocked).toUpperCase() === 'TRUE') continue;
-    const qty = parseFloat(row['Quantity']) || 0;
-    if (qty <= 0) continue;
-
-    addBatch(code, {
-      source:      'Inventory',
-      orderDate:   parseExcelDate(row['Order Date']),
-      remaining:   qty,
-      location:    String(row['Location'] || '').trim(),
-      pickLoc:     String(row['Type Location'] || row['Location'] || '').trim(),
-      caseNo:      caseNo,
-      containerNo: invContainerNo,
-      refNo:       String(row['Order No'] || '').trim(),
-      plant:       String(row['Plant'] || '').trim(),
       partName:    String(row['Part Name'] || '').trim(),
       type:        String(row['Type'] || row['Pack Type'] || row['Packing Type'] || row['Packing'] || '').trim()
     });
