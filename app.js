@@ -215,13 +215,13 @@ function buildSupplyPool(inventoryRows, containerRows) {
   let lastContainerNo = '';
 
   // Resolve the actual C/T No column name dynamically.
-  // The xlsx parser may produce 'C/T No', 'C/T No.', 'C/T NO ', etc.
-  // Normalise by stripping spaces/dots and uppercasing to find the right key.
-  const _normKey = (k) => k.replace(/[\s.]/g, '').toUpperCase();
+  // Strip ALL non-alphanumeric chars so C/T No, C/T No., C\u2215T No, BOM+C/T No
+  // all normalise to CTNO and match correctly.
+  const _normKey = (k) => k.replace(/[^A-Z0-9]/gi, '').toUpperCase();
   const _ctNoKey = containerRows.length > 0
     ? (Object.keys(containerRows[0]).find(k => {
         const n = _normKey(k);
-        return n === 'C/TNO' || n === 'CTNO' || n === 'CONTAINERNO';
+        return n === 'CTNO' || n === 'CONTAINERNO' || n === 'CONTAINERNUM';
       }) || null)
     : null;
 
@@ -293,12 +293,13 @@ function buildSupplyPool(inventoryRows, containerRows) {
 function buildCombinedShortages(shortages, containerRows) {
   if (!containerRows || containerRows.length === 0) return { combined: shortages, partsWithTransitCount: 0 };
 
-  // Resolve C/T No column key dynamically (same logic as buildSupplyPool)
-  const _norm2 = (k) => k.replace(/[\s.]/g, '').toUpperCase();
+  // Resolve C/T No column key dynamically — strip ALL non-alphanumeric so any
+  // slash/dot/space variant normalises to CTNO.
+  const _norm2 = (k) => k.replace(/[^A-Z0-9]/gi, '').toUpperCase();
   const _ctKey2 = containerRows.length > 0
     ? (Object.keys(containerRows[0]).find(k => {
         const n = _norm2(k);
-        return n === 'C/TNO' || n === 'CTNO' || n === 'CONTAINERNO';
+        return n === 'CTNO' || n === 'CONTAINERNO' || n === 'CONTAINERNUM';
       }) || null)
     : null;
   const _getCt2 = (row) => _ctKey2 ? String(row[_ctKey2] || '').trim() : String(
