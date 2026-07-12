@@ -462,7 +462,8 @@ function runFIFO(requests, pool) {
         'Plant Sub Line':                     String(req['Plant Sub Line'] || '').trim(),
         'Shift Name':                         String(req['Shift Name'] || '').trim(),
         // ── internal markers (filtered out of Excel columns) ───
-        _multiSource: false,
+        _sourceLoc:                           batch.location,
+        _multiSource:                         false,
         _batchNum:    0,
         _batchTotal:  0,
         _reqIdx:      reqIdx   // unique request index for per-location deduplication
@@ -1048,29 +1049,35 @@ function downloadExcel() {
       createWorkbook(state.results.fulfilled, state.results.shortages, fullSummaryRows, partMasterList, 'FULL');
     }, 400);
 
-    // 5. Generate and download a separate file for each unique location
+    // 5. Generate and download a separate file for each unique SOURCE WAREHOUSE
+    // We use _sourceLoc (e.g. KD1, KD2, Container Yard) to generate true pick lists
+    const sourceLocs = new Set();
+    state.results.fulfilled.forEach(r => {
+      const sLoc = String(r._sourceLoc || r['Allocation Source'] || '').trim();
+      if (sLoc) sourceLocs.add(sLoc);
+    });
+
     let delay = 700;
-    locations.forEach(loc => {
+    sourceLocs.forEach(sLoc => {
       setTimeout(() => {
-        const fRows = state.results.fulfilled.filter(r => String(r['Destination Location'] || '').trim() === loc);
-        const sRows = state.results.shortages.filter(r => String(r['Destination Location'] || '').trim() === loc);
+        const fRows = state.results.fulfilled.filter(r => String(r._sourceLoc || r['Allocation Source'] || '').trim() === sLoc);
+        // We don't include shortages in the source-specific pick lists because shortages
+        // haven't been allocated to a source yet.
+        const sRows = []; 
         
-        const s = locSummaries.get(loc);
         const locSummaryRow = [{
-          'Destination Location': loc,
-          'Requests Processed': s.totalReqs,
-          'Fully Fulfilled': s.fulfilledFull,
-          'Shortage Count': s.shortageCount,
-          'Parts In Transit': s.partsTransit,
+          'Report Type': `${sLoc} Pick List`,
+          'Total Rows to Pick': fRows.length,
+          'Total Units to Pick': fRows.reduce((sum, r) => sum + (parseFloat(r['Quantity Allocated From This Batch']) || 0), 0),
           'Generated At': new Date().toLocaleString()
         }];
 
-        createWorkbook(fRows, sRows, locSummaryRow, null, loc);
+        createWorkbook(fRows, sRows, locSummaryRow, null, sLoc);
       }, delay);
       delay += 400; // Stagger downloads slightly to prevent browser blocking
     });
 
-    showToast(`Downloading ALL reports (Full, Parts Master, and ${locations.size} locations)...`, 'success', 6000);
+    showToast(`Downloading ALL reports (Full Master, Parts Master, and Pick Lists)...`, 'success', 6000);
   } catch (err) {
     showToast(`Export error: ${err.message}`, 'error');
     console.error(err);
