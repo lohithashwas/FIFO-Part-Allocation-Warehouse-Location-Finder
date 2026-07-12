@@ -202,7 +202,6 @@ function buildSupplyPool(inventoryRows, containerRows) {
       remaining: qty,
       location:  String(row['Location'] || '').trim(),
       pickLoc:   String(row['Type Location'] || row['Location'] || '').trim(),
-      status:    String(row['Status'] || '').trim(),
       caseNo:    String(row['Case No'] || '').trim(),
       refNo:     String(row['Order No'] || '').trim(),
       plant:     String(row['Plant'] || '').trim(),
@@ -399,30 +398,28 @@ function runFIFO(requests, pool) {
         : (batch.source === 'Container' ? 'Container Yard' : batch.source);
 
       fulfilled.push({
-        'Container No.':                 batch.source === 'Container' ? (batch.containerNo || batch.caseNo) : '',
-        'Type':                          batch.type || batch.source,
-        'Case No':                          batch.caseNo,
-        'Warehouse / Location':             warehouseLabel,
-        'Destination Location':             destLoc,
-        'Pick Location':                    batch.pickLoc,
-        'Batch Order Date':                 formatDate(batch.orderDate),
-        'Order No / Invoice No':            batch.refNo,
-        'Part Code':                        partCode,
-        'Part Name':                        partName || batch.partName,
+        'Container No.':                      batch.source === 'Container' ? (batch.containerNo || batch.caseNo) : '',
+        'Type':                               batch.type || batch.source,
+        'Case No':                            batch.caseNo,
+        'Warehouse / Location':               warehouseLabel,
+        'Destination Location':               destLoc,
+        'Pick Location':                      batch.pickLoc,
+        'Batch Order Date':                   formatDate(batch.orderDate),
+        'Order No / Invoice No':              batch.refNo,
+        'Part Code':                          partCode,
+        'Part Name':                          partName || batch.partName,
         'Quantity Allocated From This Batch': allocate,
-        'Plant':                            batch.plant || '',
-        'Source Location':                  String(req['Source Location'] || '').trim(),
-        // ── remaining reference fields ──────────────────────
-        'Requested Quantity':               requestedQty,
-        'Requested Date':                   formatDate(reqDate),
-        'Running Total Fulfilled':          runningTotal,
-        'Allocation Source':                batch.source,
-        'Status':                           'Pending',
-        'Batch Location':                   batch.location,
-        'Plant Sub Line':                   String(req['Plant Sub Line'] || '').trim(),
-        'Shift Name':                       String(req['Shift Name'] || '').trim(),
-        // ── internal markers (filtered out of Excel columns) ─
-        _multiSource: false,   // filled in below
+        'Plant':                              batch.plant || '',
+        // ── additional reference fields ────────────────────────
+        'Requested Quantity':                 requestedQty,
+        'Requested Date':                     formatDate(reqDate),
+        'Running Total Fulfilled':            runningTotal,
+        'Allocation Source':                  batch.source,
+        'Status':                             'Pending',
+        'Plant Sub Line':                     String(req['Plant Sub Line'] || '').trim(),
+        'Shift Name':                         String(req['Shift Name'] || '').trim(),
+        // ── internal markers (filtered out of Excel columns) ───
+        _multiSource: false,
         _batchNum:    0,
         _batchTotal:  0
       });
@@ -678,8 +675,7 @@ const PRIORITY_COLS = [
   'Part Code',
   'Part Name',
   'Quantity Allocated From This Batch',
-  'Plant',
-  'Source Location'
+  'Plant'
 ];
 
 // Styles
