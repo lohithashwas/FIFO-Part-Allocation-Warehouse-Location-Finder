@@ -186,6 +186,20 @@ function buildSupplyPool(inventoryRows, containerRows) {
     pool.get(partCode).push(batch);
   };
 
+  // Resolve the actual C/T No column name dynamically for INVENTORY sheet
+  const _normInvKey = (k) => k.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+  const _ctNoInvKey = inventoryRows.length > 0
+    ? (Object.keys(inventoryRows[0]).find(k => {
+        const n = _normInvKey(k);
+        return n === 'CTNO' || n === 'CONTAINERNO' || n === 'CONTAINERNUM';
+      }) || null)
+    : null;
+
+  const _getInvCtNo = (row) => _ctNoInvKey ? String(row[_ctNoInvKey] || '').trim() : String(
+    row['C/T No'] || row['C/T No.'] || row['C/T NO'] || row['CT No'] ||
+    row['Container No'] || row['Container No.'] || row['Container Number'] || ''
+  ).trim();
+
   // Inventory
   for (const row of inventoryRows) {
     const code = String(row['Part Code'] || '').trim();
@@ -197,16 +211,17 @@ function buildSupplyPool(inventoryRows, containerRows) {
     if (qty <= 0) continue;
 
     addBatch(code, {
-      source:    'Inventory',
-      orderDate: parseExcelDate(row['Order Date']),
-      remaining: qty,
-      location:  String(row['Location'] || '').trim(),
-      pickLoc:   String(row['Type Location'] || row['Location'] || '').trim(),
-      caseNo:    String(row['Case No'] || '').trim(),
-      refNo:     String(row['Order No'] || '').trim(),
-      plant:     String(row['Plant'] || '').trim(),
-      partName:  String(row['Part Name'] || '').trim(),
-      type:      String(row['Type'] || row['Pack Type'] || row['Packing Type'] || row['Packing'] || '').trim()
+      source:      'Inventory',
+      orderDate:   parseExcelDate(row['Order Date']),
+      remaining:   qty,
+      location:    String(row['Location'] || '').trim(),
+      pickLoc:     String(row['Type Location'] || row['Location'] || '').trim(),
+      caseNo:      String(row['Case No'] || '').trim(),
+      containerNo: _getInvCtNo(row),
+      refNo:       String(row['Order No'] || '').trim(),
+      plant:       String(row['Plant'] || '').trim(),
+      partName:    String(row['Part Name'] || '').trim(),
+      type:        String(row['Type'] || row['Pack Type'] || row['Packing Type'] || row['Packing'] || '').trim()
     });
   }
 
