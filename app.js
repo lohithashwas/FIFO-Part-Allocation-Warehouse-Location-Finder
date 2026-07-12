@@ -417,11 +417,25 @@ function runFIFO(requests, pool) {
     const requestedQty = parseFloat(req['Quantity']) || 0;
     const partName = String(req['Part Name'] || '').trim();
     const reqDate  = req['Requested Date'];
-    const destLoc  = String(req['Destination Location'] || '').trim();
+    // The user clarified that the column labeled 'Destination Location' in the 
+    // Request Excel actually specifies the strict Source Location to pull from.
+    const reqSourceLoc  = String(req['Source Location'] || req['Destination Location'] || '').trim();
 
-    const batches = pool.get(partCode) || [];
+    let batches = pool.get(partCode) || [];
 
-    // Total available at this moment (before this allocation)
+    // STRICT SOURCE MATCHING: Only allow allocation from the requested physical warehouse
+    if (reqSourceLoc) {
+      batches = batches.filter(b => {
+        const bLoc = String(b.location).toUpperCase();
+        const rLoc = reqSourceLoc.toUpperCase();
+        if (bLoc === rLoc) return true;
+        // Handle variations of Container Yard
+        if ((rLoc === 'CONT YARD' || rLoc === 'CONTAINER YARD') && (bLoc === 'CONT YARD' || bLoc === 'CONTAINER YARD')) return true;
+        return false;
+      });
+    }
+
+    // Total available at this moment IN THE REQUESTED LOCATION
     const totalAvailable = batches.reduce((s, b) => s + b.remaining, 0);
 
     let needed = requestedQty;
@@ -445,7 +459,8 @@ function runFIFO(requests, pool) {
         'Container No.':                      batch.containerNo || '',
         'Type':                               batch.type || batch.source,
         'Case No':                            batch.caseNo,
-        'Destination Location':               destLoc,
+        'Destination Location':               String(req['Destination Location'] || ''), // Keeping column name for template compatibility
+
         'Pick Location':                      batch.pickLoc,
         'Batch Order Date':                   formatDate(batch.orderDate),
         'Order No / Invoice No':              batch.refNo,
