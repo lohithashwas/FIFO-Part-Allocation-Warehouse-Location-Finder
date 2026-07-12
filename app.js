@@ -201,7 +201,14 @@ function buildSupplyPool(inventoryRows, containerRows) {
   ).trim();
 
   // Inventory
+  let lastInvContainerNo = '';
   for (const row of inventoryRows) {
+    // Forward-fill C/T No for Inventory BEFORE skip checks
+    // (in case Inventory sheet also uses group headers or merged cells for C/T No)
+    const rawInvContainerNo = _getInvCtNo(row);
+    if (rawInvContainerNo) lastInvContainerNo = rawInvContainerNo;
+    const invContainerNo = lastInvContainerNo;
+
     const code = String(row['Part Code'] || '').trim();
     if (!code) continue;
     // Exclude blocked rows
@@ -217,7 +224,7 @@ function buildSupplyPool(inventoryRows, containerRows) {
       location:    String(row['Location'] || '').trim(),
       pickLoc:     String(row['Type Location'] || row['Location'] || '').trim(),
       caseNo:      String(row['Case No'] || '').trim(),
-      containerNo: _getInvCtNo(row),
+      containerNo: invContainerNo,
       refNo:       String(row['Order No'] || '').trim(),
       plant:       String(row['Plant'] || '').trim(),
       partName:    String(row['Part Name'] || '').trim(),
