@@ -417,18 +417,20 @@ function runFIFO(requests, pool) {
     const requestedQty = parseFloat(req['Quantity']) || 0;
     const partName = String(req['Part Name'] || '').trim();
     const reqDate  = req['Requested Date'];
-    const destLoc  = String(req['Destination Location'] || '').trim();
-    // The user clarified that the column labeled 'Destination Location' in the 
-    // Request Excel actually specifies the strict Source Location to pull from.
-    const reqSourceLoc  = String(req['Source Location'] || destLoc).trim();
+
+    // In the user's Request Excel, the headers are inverted:
+    // 'Destination Location' = The physical warehouse to pull from (KD1 WAREHOUSE, CONT YARD)
+    // 'Source Location' = The assembly line where the parts are going (JOBORDER P1)
+    const warehouseToPullFrom = String(req['Destination Location'] || '').trim();
+    const assemblyLineGoingTo = String(req['Source Location'] || '').trim();
 
     let batches = pool.get(partCode) || [];
 
     // STRICT SOURCE MATCHING & SHARED POOLS:
     // 1. KD1 requests STRICTLY pull from KD1 only.
     // 2. KD2, KD3, and CONT YARD requests can pull from ANY of those 3 locations in FIFO order.
-    if (reqSourceLoc) {
-      const rLoc = reqSourceLoc.toUpperCase();
+    if (warehouseToPullFrom) {
+      const rLoc = warehouseToPullFrom.toUpperCase();
       const isGroupB = rLoc.includes('KD2') || rLoc.includes('KD3') || rLoc.includes('CONT');
 
       batches = batches.filter(b => {
@@ -471,8 +473,8 @@ function runFIFO(requests, pool) {
         'Container No.':                      batch.containerNo || '',
         'Type':                               batch.type || batch.source,
         'Case No':                            batch.caseNo,
-        'Destination Location':               String(req['Destination Location'] || ''), // Keeping column name for template compatibility
-
+        'Source Location':                    warehouseToPullFrom,
+        'Destination Location':               assemblyLineGoingTo,
         'Pick Location':                      batch.pickLoc,
         'Batch Order Date':                   formatDate(batch.orderDate),
         'Order No / Invoice No':              batch.refNo,
@@ -524,7 +526,8 @@ function runFIFO(requests, pool) {
         'Part Name':              partName,
         'Requested Quantity':     requestedQty,
         'Requested Date':         formatDate(reqDate),
-        'Destination Location':   destLoc,
+        'Source Location':        warehouseToPullFrom,
+        'Destination Location':   assemblyLineGoingTo,
         'Total Quantity Available': totalAvailable,
         'Total Quantity Allocated': totalAllocated,
         'Shortage Quantity':      shortage,
