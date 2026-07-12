@@ -221,13 +221,16 @@ function buildSupplyPool(inventoryRows, containerRows) {
     const qty = parseFloat(row['Quantity']) || 0;
     if (qty <= 0) continue;
 
-    const caseNo = String(row['Case No'] || '').trim();
-    const status = String(row['Status'] || '').trim();
-    const destuff = String(row['Destuff Status'] || '').trim();
+    const caseNo  = String(row['Case No'] || '').trim();
+    const status   = String(row['Status'] || '').trim();
+    const destuff  = String(row['Destuff Status'] || '').trim();
     const contLoc  = String(row['Container Location'] || '').trim();
-    const loc = String(row['Location'] || '').trim();
+    // NOTE: We intentionally do NOT read row['Location'] for containers —
+    // that column holds unrelated data in the Container List sheet.
+    // The physical location for containers is 'Container Location' or 'Container Yard'.
+    const physLoc  = contLoc || 'Container Yard';
 
-    // Forward-fill container number
+    // Forward-fill container number from C/T No column
     const rawContainerNo = String(
       row['C/T No'] || row['C/T No.'] || row['Container No.'] ||
       row['Container No'] || row['Container Number'] || ''
@@ -243,8 +246,7 @@ function buildSupplyPool(inventoryRows, containerRows) {
     // (It will be picked up by the shortage cross-check instead)
     if (isTransitOrPort) continue;
 
-    // Build pick location: prefer physical location, append case/status/destuff detail
-    const physLoc = loc || contLoc || 'Container Yard';
+    // Build pick location: physical location + case/status/destuff detail
     const pickDetail = [caseNo ? `Case: ${caseNo}` : '', status ? `Status: ${status}` : '', destuff ? `Destuff: ${destuff}` : '']
                        .filter(Boolean).join(' | ');
     const pickLoc = pickDetail ? `${physLoc} | ${pickDetail}` : physLoc;
@@ -253,11 +255,11 @@ function buildSupplyPool(inventoryRows, containerRows) {
       source:      'Container',
       orderDate:   parseExcelDate(row['Order Date']),
       remaining:   qty,
-      location:    loc,
+      location:    physLoc,        // Container Location or 'Container Yard'
       pickLoc,
       status,
       caseNo,
-      containerNo,
+      containerNo,                 // Forward-filled from C/T No
       refNo:       String(row['Invoice No'] || '').trim(),
       portETA:     String(row['Port ETA'] || '').trim(),
       portATA:     String(row['Port ATA'] || '').trim(),
