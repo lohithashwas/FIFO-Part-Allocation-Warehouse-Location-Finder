@@ -423,15 +423,26 @@ function runFIFO(requests, pool) {
 
     let batches = pool.get(partCode) || [];
 
-    // STRICT SOURCE MATCHING: Only allow allocation from the requested physical warehouse
+    // STRICT SOURCE MATCHING & SHARED POOLS:
+    // 1. KD1 requests STRICTLY pull from KD1 only.
+    // 2. KD2, KD3, and CONT YARD requests can pull from ANY of those 3 locations in FIFO order.
     if (reqSourceLoc) {
+      const rLoc = reqSourceLoc.toUpperCase();
+      const isGroupB = rLoc.includes('KD2') || rLoc.includes('KD3') || rLoc.includes('CONT');
+
       batches = batches.filter(b => {
         const bLoc = String(b.location).toUpperCase();
-        const rLoc = reqSourceLoc.toUpperCase();
-        if (bLoc === rLoc) return true;
-        // Handle variations of Container Yard
-        if ((rLoc === 'CONT YARD' || rLoc === 'CONTAINER YARD') && (bLoc === 'CONT YARD' || bLoc === 'CONTAINER YARD')) return true;
-        return false;
+        
+        if (rLoc === 'KD1') {
+          return bLoc === 'KD1';
+        } else if (isGroupB) {
+          return bLoc.includes('KD2') || bLoc.includes('KD3') || bLoc.includes('CONT');
+        } else {
+          // Fallback: strict match for any other unknown location
+          if (bLoc === rLoc) return true;
+          if ((rLoc === 'CONT YARD' || rLoc === 'CONTAINER YARD') && (bLoc === 'CONT YARD' || bLoc === 'CONTAINER YARD')) return true;
+          return false;
+        }
       });
     }
 
