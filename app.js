@@ -214,14 +214,27 @@ function buildSupplyPool(inventoryRows, containerRows) {
   // Add containers to FIFO pool UNLESS they are 'In Transit' or 'At Port'
   let lastContainerNo = '';
 
+  // Resolve the actual C/T No column name dynamically.
+  // The xlsx parser may produce 'C/T No', 'C/T No.', 'C/T NO ', etc.
+  // Normalise by stripping spaces/dots and uppercasing to find the right key.
+  const _normKey = (k) => k.replace(/[\s.]/g, '').toUpperCase();
+  const _ctNoKey = containerRows.length > 0
+    ? (Object.keys(containerRows[0]).find(k => {
+        const n = _normKey(k);
+        return n === 'C/TNO' || n === 'CTNO' || n === 'CONTAINERNO';
+      }) || null)
+    : null;
+
+  const _getCtNo = (row) => _ctNoKey ? String(row[_ctNoKey] || '').trim() : String(
+    row['C/T No'] || row['C/T No.'] || row['C/T NO'] || row['CT No'] ||
+    row['Container No'] || row['Container No.'] || row['Container Number'] || ''
+  ).trim();
+
   for (const row of containerRows) {
     // ── Forward-fill C/T No FIRST, before any skip checks ──────────────────
     // The C/T No value often sits only on a group-header row that has no Part No.
     // We must capture it even if that row is skipped for other reasons.
-    const rawContainerNo = String(
-      row['C/T No'] || row['C/T No.'] || row['Container No.'] ||
-      row['Container No'] || row['Container Number'] || ''
-    ).trim();
+    const rawContainerNo = _getCtNo(row);
     if (rawContainerNo) lastContainerNo = rawContainerNo;
     const containerNo = lastContainerNo;
     // ───────────────────────────────────────────────────────────────────────
@@ -280,13 +293,23 @@ function buildSupplyPool(inventoryRows, containerRows) {
 function buildCombinedShortages(shortages, containerRows) {
   if (!containerRows || containerRows.length === 0) return { combined: shortages, partsWithTransitCount: 0 };
 
+  // Resolve C/T No column key dynamically (same logic as buildSupplyPool)
+  const _norm2 = (k) => k.replace(/[\s.]/g, '').toUpperCase();
+  const _ctKey2 = containerRows.length > 0
+    ? (Object.keys(containerRows[0]).find(k => {
+        const n = _norm2(k);
+        return n === 'C/TNO' || n === 'CTNO' || n === 'CONTAINERNO';
+      }) || null)
+    : null;
+  const _getCt2 = (row) => _ctKey2 ? String(row[_ctKey2] || '').trim() : String(
+    row['C/T No'] || row['C/T No.'] || row['C/T NO'] || row['CT No'] ||
+    row['Container No'] || row['Container No.'] || row['Container Number'] || ''
+  ).trim();
+
   // Forward-fill container number in container rows
   let lastCT = '';
   const enriched = containerRows.map(row => {
-    const raw = String(
-      row['C/T No'] || row['C/T No.'] || row['Container No.'] ||
-      row['Container No'] || row['Container Number'] || ''
-    ).trim();
+    const raw = _getCt2(row);
     if (raw) lastCT = raw;
     return { ...row, _ctNo: lastCT };
   });
