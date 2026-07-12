@@ -953,124 +953,56 @@ function downloadExcel() {
       XLSX.writeFile(wbParts, `FIFO_Allocation_PARTS_MASTER_${stamp}.xlsx`);
     }, 100);
 
-    // 1. Identify all unique Destination Locations
-    const locations = new Set();
-    state.results.fulfilled.forEach(r => {
-      const loc = String(r['Destination Location'] || '').trim();
-      if (loc) locations.add(loc);
-    });
-    state.results.shortages.forEach(r => {
-      const loc = String(r['Destination Location'] || '').trim();
-      if (loc) locations.add(loc);
-    });
-
-    // 2. Pre-calculate summaries for each location
-    const locSummaries = new Map();
-    
-    locations.forEach(loc => {
-      const fRows = state.results.fulfilled.filter(r => String(r['Destination Location'] || '').trim() === loc);
-      const sRows = state.results.shortages.filter(r => String(r['Destination Location'] || '').trim() === loc);
-      
-      let locUnitsAlloc = 0;
-      let locUnitsShort = 0;
-      let locUnitsReq = 0;
-      
-      const seenReqs     = new Set();
-      const uniqueShortages = new Set();
-      const partsInTransitSet = new Set();
-
-      fRows.forEach(r => {
-        locUnitsAlloc += (parseFloat(r['Quantity Allocated From This Batch']) || 0);
-        // Use _reqIdx for guaranteed-unique request deduplication
-        if (r._reqIdx != null && !seenReqs.has(r._reqIdx)) {
-          seenReqs.add(r._reqIdx);
-          locUnitsReq += (parseFloat(r['Requested Quantity']) || 0);
-        }
-      });
-
-      sRows.forEach(r => {
-        if (parseFloat(r['In Transit Qty']) > 0) partsInTransitSet.add(r['Part Code']);
-
-        if (r._reqIdx != null && !uniqueShortages.has(r._reqIdx)) {
-          uniqueShortages.add(r._reqIdx);
-          locUnitsShort += (parseFloat(r['Shortage Quantity']) || 0);
-        }
-        if (r._reqIdx != null && !seenReqs.has(r._reqIdx)) {
-          seenReqs.add(r._reqIdx);
-          locUnitsReq += (parseFloat(r['Requested Quantity']) || 0);
-        }
-      });
-      
-      locSummaries.set(loc, {
-        totalReqs: seenReqs.size,
-        fulfilledFull: seenReqs.size - uniqueShortages.size,
-        shortageCount: uniqueShortages.size,
-        unitsReq: locUnitsReq,
-        unitsAlloc: locUnitsAlloc,
-        unitsShort: locUnitsShort,
-        partsTransit: partsInTransitSet.size
-      });
-    });
-
-    // 3. Build multi-row Summary for the FULL report
+    // 1. Download the FULL Master Report FIRST (unchanged)
     const overallPartsInTransit = new Set();
     state.results.shortages.forEach(r => {
-      if (parseFloat(r['In Transit Qty']) > 0) {
-        overallPartsInTransit.add(r['Part Code']);
-      }
+      if (parseFloat(r['In Transit Qty']) > 0) overallPartsInTransit.add(r['Part Code']);
     });
 
-    const fullSummaryRows = [
-      {
-        'Destination Location': 'ALL (OVERALL)',
-        'Requests Processed': state.results.summary.totalReqs,
-        'Fully Fulfilled': state.results.summary.fulfilledFull,
-        'Shortage Count': state.results.summary.shortageCount,
-        'Parts In Transit': overallPartsInTransit.size,
-        'Generated At': new Date().toLocaleString()
-      }
-    ];
+    const fullSummaryRows = [{
+      'Report Type': 'ALL (OVERALL)',
+      'Total Requests Processed': state.results.summary.totalReqs,
+      'Fully Fulfilled': state.results.summary.fulfilledFull,
+      'Shortage Count': state.results.summary.shortageCount,
+      'Parts In Transit': overallPartsInTransit.size,
+      'Generated At': new Date().toLocaleString()
+    }];
 
-    locations.forEach(loc => {
-      const s = locSummaries.get(loc);
-      fullSummaryRows.push({
-        'Destination Location': loc,
-        'Requests Processed': s.totalReqs,
-        'Fully Fulfilled': s.fulfilledFull,
-        'Shortage Count': s.shortageCount,
-        'Parts In Transit': s.partsTransit,
-        'Generated At': ''
-      });
-    });
-
-    // 4. Download the FULL Master Report
     setTimeout(() => {
       createWorkbook(state.results.fulfilled, state.results.shortages, fullSummaryRows, partMasterList, 'FULL');
     }, 400);
 
-    // 5. Generate and download a separate file for each unique location
+    // 2. Generate and download a separate file for each ALLOCATION SOURCE (Warehouse vs Container)
+    const sources = new Set();
+    state.results.fulfilled.forEach(r => {
+      const src = String(r['Allocation Source'] || '').trim();
+      if (src) sources.add(src);
+    });
+
     let delay = 700;
-    locations.forEach(loc => {
+    sources.forEach(src => {
       setTimeout(() => {
-        const fRows = state.results.fulfilled.filter(r => String(r['Destination Location'] || '').trim() === loc);
-        const sRows = state.results.shortages.filter(r => String(r['Destination Location'] || '').trim() === loc);
+        // Filter fulfilled rows by where they were actually picked from
+        const fRows = state.results.fulfilled.filter(r => String(r['Allocation Source'] || '').trim() === src);
         
-        const s = locSummaries.get(loc);
-        const locSummaryRow = [{
-          'Destination Location': loc,
-          'Requests Processed': s.totalReqs,
-          'Fully Fulfilled': s.fulfilledFull,
-          'Shortage Count': s.shortageCount,
-          'Parts In Transit': s.partsTransit,
+        // For source-specific sheets, shortages don't belong to a source, so we can either
+        // omit them or pass the global ones. Passing empty array keeps the pick list clean.
+        const sRows = []; 
+
+        const srcSummaryRow = [{
+          'Report Type': `${src} Pick List`,
+          'Rows Allocated': fRows.length,
+          'Total Units Allocated': fRows.reduce((sum, r) => sum + (parseFloat(r['Quantity Allocated From This Batch']) || 0), 0),
           'Generated At': new Date().toLocaleString()
         }];
 
-        createWorkbook(fRows, sRows, locSummaryRow, null, loc);
+        // Name the file based on the source (e.g. 'Inventory', 'Container')
+        createWorkbook(fRows, sRows, srcSummaryRow, null, src);
       }, delay);
-      delay += 400; // Stagger downloads slightly to prevent browser blocking
+      delay += 400; // Stagger downloads slightly
     });
 
-    showToast(`Downloading ALL reports (Full, Parts Master, and ${locations.size} locations)...`, 'success', 6000);
+    showToast(`Downloading ALL reports (Full Master, Parts Master, and Pick Lists)...`, 'success', 6000);
   } catch (err) {
     showToast(`Export error: ${err.message}`, 'error');
     console.error(err);
