@@ -420,7 +420,7 @@ function runFIFO(requests, pool) {
       runningTotal += allocate;
 
       fulfilled.push({
-        'Container No.':                      batch.containerNo || batch.caseNo || '',
+        'Container No.':                      batch.containerNo || '',
         'Type':                               batch.type || batch.source,
         'Case No':                            batch.caseNo,
         'Destination Location':               destLoc,
