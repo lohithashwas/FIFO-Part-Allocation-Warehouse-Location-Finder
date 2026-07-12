@@ -741,6 +741,7 @@ const PRIORITY_COLS = [
   'Container No.',
   'Type',
   'Case No',
+  'Source Location',
   'Destination Location',
   'Pick Location',
   'Batch Order Date',
@@ -896,7 +897,7 @@ function downloadExcel() {
       // Sheet 2: Shortages
       const shortagePri = [
         'Part Code', 'Part Name', 'Requested Quantity', 'Shortage Quantity', 'Net Status',
-        'Container No.', 'In Transit Qty', 'Container Status', 'Port ETA', 'Destination Location'
+        'Container No.', 'In Transit Qty', 'Container Status', 'Port ETA', 'Source Location', 'Destination Location'
       ];
       const ws2 = buildStyledSheet(sRows.length ? sRows : [{ Note: 'No shortages.' }], shortagePri);
       XLSX.utils.book_append_sheet(wb, ws2, 'Shortages');
@@ -1091,9 +1092,9 @@ function downloadExcel() {
     sourceLocs.forEach(sLoc => {
       setTimeout(() => {
         const fRows = state.results.fulfilled.filter(r => String(r._sourceLoc || r['Allocation Source'] || '').trim() === sLoc);
-        // We don't include shortages in the source-specific pick lists because shortages
-        // haven't been allocated to a source yet.
-        const sRows = []; 
+        
+        // Include shortages that were requested specifically from this source location
+        const sRows = state.results.shortages.filter(r => String(r['Source Location'] || '').trim() === sLoc);
         
         const locSummaryRow = [{
           'Report Type': `${sLoc} Pick List`,
