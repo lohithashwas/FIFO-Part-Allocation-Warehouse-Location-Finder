@@ -215,6 +215,17 @@ function buildSupplyPool(inventoryRows, containerRows) {
   let lastContainerNo = '';
 
   for (const row of containerRows) {
+    // ── Forward-fill C/T No FIRST, before any skip checks ──────────────────
+    // The C/T No value often sits only on a group-header row that has no Part No.
+    // We must capture it even if that row is skipped for other reasons.
+    const rawContainerNo = String(
+      row['C/T No'] || row['C/T No.'] || row['Container No.'] ||
+      row['Container No'] || row['Container Number'] || ''
+    ).trim();
+    if (rawContainerNo) lastContainerNo = rawContainerNo;
+    const containerNo = lastContainerNo;
+    // ───────────────────────────────────────────────────────────────────────
+
     const code = String(row['Part No'] || '').trim();
     if (!code) continue;
     const qty = parseFloat(row['Quantity']) || 0;
@@ -224,18 +235,8 @@ function buildSupplyPool(inventoryRows, containerRows) {
     const status   = String(row['Status'] || '').trim();
     const destuff  = String(row['Destuff Status'] || '').trim();
     const contLoc  = String(row['Container Location'] || '').trim();
-    // NOTE: We intentionally do NOT read row['Location'] for containers —
-    // that column holds unrelated data in the Container List sheet.
     // The physical location for containers is 'Container Location' or 'Container Yard'.
     const physLoc  = contLoc || 'Container Yard';
-
-    // Forward-fill container number from C/T No column
-    const rawContainerNo = String(
-      row['C/T No'] || row['C/T No.'] || row['Container No.'] ||
-      row['Container No'] || row['Container Number'] || ''
-    ).trim();
-    if (rawContainerNo) lastContainerNo = rawContainerNo;
-    const containerNo = lastContainerNo;
 
     // Is this container still in transit or at the port? (Check ONLY the Status column)
     const statusUpper = status.toUpperCase();
@@ -392,16 +393,10 @@ function runFIFO(requests, pool) {
       totalAllocated += allocate;
       runningTotal += allocate;
 
-      // Resolve the human-readable warehouse / location label
-      const warehouseLabel = batch.location
-        ? batch.location
-        : (batch.source === 'Container' ? 'Container Yard' : batch.source);
-
       fulfilled.push({
         'Container No.':                      batch.source === 'Container' ? (batch.containerNo || batch.caseNo) : '',
         'Type':                               batch.type || batch.source,
         'Case No':                            batch.caseNo,
-        'Warehouse / Location':               warehouseLabel,
         'Destination Location':               destLoc,
         'Pick Location':                      batch.pickLoc,
         'Batch Order Date':                   formatDate(batch.orderDate),
@@ -581,7 +576,6 @@ function renderTable(type, rows) {
         <td>${fmt(row['Requested Quantity'])}</td>
         <td>${esc(row['Requested Date'])}</td>
         <td>${esc(row['Destination Location'])}</td>
-        <td style="font-weight:600;color:var(--navy)">${esc(row['Warehouse / Location'])}</td>
         <td>${srcBadge}</td>
         <td>${esc(row['Pick Location'])}</td>
         <td>${esc(row['Batch Order Date'])}</td>
@@ -605,7 +599,7 @@ function renderTable(type, rows) {
 
         const sep = document.createElement('tr');
         sep.className = `group-separator ${sepClass}`;
-        sep.innerHTML = `<td colspan="13">
+        sep.innerHTML = `<td colspan="12">
           <div class="group-summary">
             <span class="gs-part">📦 ${esc(row['Part Code'])} &nbsp;·&nbsp; ${row._batchTotal} batches</span>
             <span class="gs-item">Requested: <strong>${fmt(reqQty)}</strong></span>
@@ -667,7 +661,6 @@ const PRIORITY_COLS = [
   'Container No.',
   'Type',
   'Case No',
-  'Warehouse / Location',
   'Destination Location',
   'Pick Location',
   'Batch Order Date',
