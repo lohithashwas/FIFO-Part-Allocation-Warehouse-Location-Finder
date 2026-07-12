@@ -363,8 +363,10 @@ function buildCombinedShortages(shortages, containerRows) {
 function runFIFO(requests, pool) {
   const fulfilled = [];
   const shortages = [];
+  let reqIdx = 0; // unique per-request counter for accurate deduplication
 
   for (const req of requests) {
+    reqIdx++;
     const partCode = String(req['Part Code'] || '').trim();
     const requestedQty = parseFloat(req['Quantity']) || 0;
     const partName = String(req['Part Name'] || '').trim();
@@ -416,7 +418,8 @@ function runFIFO(requests, pool) {
         // ── internal markers (filtered out of Excel columns) ───
         _multiSource: false,
         _batchNum:    0,
-        _batchTotal:  0
+        _batchTotal:  0,
+        _reqIdx:      reqIdx   // unique request index for per-location deduplication
       });
     }
 
@@ -431,14 +434,11 @@ function runFIFO(requests, pool) {
       }
     }
 
-    // Fix final status on all rows added for this request
+    // Mark status on ONLY the rows added for this specific request (startIdx → endIdx)
+    // NOTE: The old backwards cumCheck loop was buggy — it could bleed into rows
+    // from previous requests if their batch quantities happened to sum to the same total.
     const finalStatus = (needed <= 0) ? 'Fulfilled' : 'Partial Shortage';
-    const rowsAddedCount = runningTotal > 0 ? fulfilled.filter(r =>
-      r['Part Code'] === partCode && r['Running Total Fulfilled'] <= runningTotal).length : 0;
-    // Mark status on every row emitted for this specific request pass
-    let cumCheck = 0;
-    for (let i = fulfilled.length - 1; i >= 0 && cumCheck < totalAllocated; i--) {
-      cumCheck += fulfilled[i]['Quantity Allocated From This Batch'];
+    for (let i = startIdx; i < endIdx; i++) {
       fulfilled[i]['Status'] = finalStatus;
     }
 
@@ -454,7 +454,8 @@ function runFIFO(requests, pool) {
         'Total Quantity Available': totalAvailable,
         'Total Quantity Allocated': totalAllocated,
         'Shortage Quantity':      shortage,
-        'Status':                 'Shortage'
+        'Status':                 'Shortage',
+        _reqIdx:                  reqIdx   // carry through buildCombinedShortages via spread
       });
     }
   }
@@ -534,8 +535,10 @@ function renderResults() {
   document.getElementById('stat-units-req').textContent    = s.unitsReq.toLocaleString();
   document.getElementById('stat-units-alloc').textContent  = s.unitsAlloc.toLocaleString();
 
+  // tc-fulfilled: show row count (each row = one batch pick instruction)
+  // tc-shortages: show UNIQUE shortage request count (not expanded transit rows)
   document.getElementById('tc-fulfilled').textContent  = state.results.fulfilled.length.toLocaleString();
-  document.getElementById('tc-shortages').textContent  = state.results.shortages.length.toLocaleString();
+  document.getElementById('tc-shortages').textContent  = s.shortageCount.toLocaleString();
 
   renderTable('fulfilled', state.results.fulfilled);
   renderTable('shortages', state.results.shortages);
@@ -926,33 +929,28 @@ function downloadExcel() {
       let locUnitsShort = 0;
       let locUnitsReq = 0;
       
-      const seenReqs = new Set();
+      const seenReqs     = new Set();
+      const uniqueShortages = new Set();
+      const partsInTransitSet = new Set();
+
       fRows.forEach(r => {
         locUnitsAlloc += (parseFloat(r['Quantity Allocated From This Batch']) || 0);
-        const reqKey = r['Part Code'] + '|' + r['Requested Date'] + '|' + r['Requested Quantity'];
-        if (!seenReqs.has(reqKey)) {
-          seenReqs.add(reqKey);
+        // Use _reqIdx for guaranteed-unique request deduplication
+        if (r._reqIdx != null && !seenReqs.has(r._reqIdx)) {
+          seenReqs.add(r._reqIdx);
           locUnitsReq += (parseFloat(r['Requested Quantity']) || 0);
         }
       });
-      
-      const uniqueShortages = new Set();
-      const partsInTransitSet = new Set();
-      
+
       sRows.forEach(r => {
-        if (parseFloat(r['In Transit Qty']) > 0) {
-          partsInTransitSet.add(r['Part Code']);
-        }
-        
-        const shortKey = r['Part Code'] + '|' + r['Requested Date'] + '|' + r['Shortage Quantity'];
-        if (!uniqueShortages.has(shortKey)) {
-          uniqueShortages.add(shortKey);
+        if (parseFloat(r['In Transit Qty']) > 0) partsInTransitSet.add(r['Part Code']);
+
+        if (r._reqIdx != null && !uniqueShortages.has(r._reqIdx)) {
+          uniqueShortages.add(r._reqIdx);
           locUnitsShort += (parseFloat(r['Shortage Quantity']) || 0);
         }
-        
-        const reqKey = r['Part Code'] + '|' + r['Requested Date'] + '|' + r['Requested Quantity'];
-        if (!seenReqs.has(reqKey)) {
-          seenReqs.add(reqKey);
+        if (r._reqIdx != null && !seenReqs.has(r._reqIdx)) {
+          seenReqs.add(r._reqIdx);
           locUnitsReq += (parseFloat(r['Requested Quantity']) || 0);
         }
       });
