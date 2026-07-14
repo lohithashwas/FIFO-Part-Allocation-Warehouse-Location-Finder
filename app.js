@@ -1566,84 +1566,82 @@ function mvDownloadPendingPartialRequest() {
       showToast('No results to download.', 'error'); return;
     }
 
-    // Filter only Pending + Partial
     const needAction = results.filter(r => r.status === 'Pending' || r.status === 'Partial');
     if (needAction.length === 0) {
       showToast('No Pending or Partial parts — everything is Fulfilled!', 'info'); return;
     }
 
-    const now    = new Date();
-    const stamp  = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
-    const dateStr = now.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
-    const timeStr = now.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    const now   = new Date();
+    const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
 
     const reqRows = mvState.data.requests;
+    if (!reqRows || reqRows.length === 0) {
+      showToast('Original request data not found.', 'error'); return;
+    }
 
-    // Find the actual Quantity column name in the original request file
-    const qtyColName = reqRows.length > 0
-      ? Object.keys(reqRows[0]).find(k => k.trim().toLowerCase() === 'quantity' || k.trim().toLowerCase() === 'qty')
-      : 'Quantity';
+    // ── Get EXACT column list from the original input file (preserves order) ──
+    const originalCols = Object.keys(reqRows[0]);
 
-    // Find the Part Code / Part No column name in original request file
-    const partColName = reqRows.length > 0
-      ? Object.keys(reqRows[0]).find(k => k.trim().toLowerCase() === 'part code' || k.trim().toLowerCase() === 'part no')
-      : 'Part Code';
+    // Detect key column names (exact match to original casing)
+    const qtyColName  = originalCols.find(k => k.trim().toLowerCase() === 'quantity' || k.trim().toLowerCase() === 'qty');
+    const partColName = originalCols.find(k => k.trim().toLowerCase() === 'part code' || k.trim().toLowerCase() === 'part no');
+    const srcColName  = originalCols.find(k => k.trim().toLowerCase() === 'source location');
 
-    // Find the Source Location column name in original request file
-    const srcColName = reqRows.length > 0
-      ? Object.keys(reqRows[0]).find(k => k.trim().toLowerCase() === 'source location')
-      : 'Source Location';
-
-    // Build a map of original rows: partCode+srcLoc → array of raw rows
+    // ── Build lookup: partCode+srcLoc → first matching original row ──
     const rawMap = new Map();
     for (const row of reqRows) {
       const pc  = String(row[partColName] || '').trim().toUpperCase();
       const src = String(srcColName ? (row[srcColName] || '') : '').trim().toUpperCase();
       const key = pc + '||' + src;
-      if (!rawMap.has(key)) rawMap.set(key, []);
-      rawMap.get(key).push(row);
+      if (!rawMap.has(key)) rawMap.set(key, row); // store only first occurrence
     }
 
-    // Build output rows — ONE ROW per Pending/Partial result (count always matches report)
-    // Use first matching original row as column template, replace Quantity with remaining qty
+    // ── ONE output row per Pending/Partial item ──
+    // Exact copy of original row; ONLY Quantity column is changed
     const outputRows = [];
     for (const item of needAction) {
       const key          = item.partCode.toUpperCase() + '||' + item.srcLoc.toUpperCase();
-      const matchingRows = rawMap.get(key) || [];
-      const remainingQty = item.pendingQty; // reqQty - movedQty
+      const originalRow  = rawMap.get(key);
+      const remainingQty = item.pendingQty;
 
-      if (matchingRows.length === 0) {
-        // Fallback: build minimal row if no original found
-        const fallback = {};
-        if (partColName) fallback[partColName] = item.partCode;
-        if (srcColName)  fallback[srcColName]  = item.srcLoc;
-        if (qtyColName)  fallback[qtyColName]  = remainingQty;
-        outputRows.push(fallback);
+      // Start with a blank row having ALL original columns (keeps exact structure)
+      const out = {};
+      for (const col of originalCols) out[col] = '';
+
+      if (originalRow) {
+        // Copy every field exactly from original row
+        for (const col of originalCols) {
+          out[col] = originalRow[col] !== undefined ? originalRow[col] : '';
+        }
       } else {
-        // Always ONE row — take first original row as template, update Quantity only
-        const out = { ...matchingRows[0] };
-        if (qtyColName) out[qtyColName] = remainingQty;
-        outputRows.push(out);
+        // Fallback — fill what we know
+        if (partColName) out[partColName] = item.partCode;
+        if (srcColName)  out[srcColName]  = item.srcLoc;
       }
+
+      // Change ONLY the Quantity field
+      if (qtyColName) out[qtyColName] = remainingQty;
+
+      outputRows.push(out);
     }
 
-    if (outputRows.length === 0) {
-      showToast('No rows to export.', 'error'); return;
-    }
-
-    // ── Build styled sheet (same look as original) ───────────────────
-    const ALN = { horizontal:'center', vertical:'center', wrapText:true };
-    const BRD = { top:{style:'medium',color:{rgb:'A0AAB5'}}, bottom:{style:'medium',color:{rgb:'A0AAB5'}}, left:{style:'medium',color:{rgb:'A0AAB5'}}, right:{style:'medium',color:{rgb:'A0AAB5'}} };
-    const HDR = { fill:{patternType:'solid',fgColor:{rgb:'0A1F44'}}, font:{bold:true,color:{rgb:'FFFFFF'},sz:11}, alignment:ALN, border:BRD };
+    // ── Build sheet using ORIGINAL column order ──
+    const ALN    = { horizontal:'center', vertical:'center', wrapText:true };
+    const BRD    = { top:{style:'medium',color:{rgb:'A0AAB5'}}, bottom:{style:'medium',color:{rgb:'A0AAB5'}}, left:{style:'medium',color:{rgb:'A0AAB5'}}, right:{style:'medium',color:{rgb:'A0AAB5'}} };
+    const HDR    = { fill:{patternType:'solid',fgColor:{rgb:'0A1F44'}}, font:{bold:true,color:{rgb:'FFFFFF'},sz:11}, alignment:ALN, border:BRD };
     const C_ODD  = { fill:{patternType:'solid',fgColor:{rgb:'FFFFFF'}}, alignment:ALN, border:BRD };
     const C_EVEN = { fill:{patternType:'solid',fgColor:{rgb:'F4F6FA'}}, alignment:ALN, border:BRD };
-    const C_QTY  = { fill:{patternType:'solid',fgColor:{rgb:'FEF3C7'}}, font:{bold:true,color:{rgb:'92400E'}}, alignment:ALN, border:BRD }; // highlight remaining qty
+    const C_QTY  = { fill:{patternType:'solid',fgColor:{rgb:'FEF3C7'}}, font:{bold:true,color:{rgb:'92400E'}}, alignment:ALN, border:BRD };
 
-    const cols = Object.keys(outputRows[0]);
-    const aoa  = [cols, ...outputRows.map(r => cols.map(c => r[c] != null ? r[c] : ''))];
-    const ws   = XLSX.utils.aoa_to_sheet(aoa);
+    // AOA built from originalCols — guarantees same column order as input
+    const aoa = [
+      originalCols,
+      ...outputRows.map(r => originalCols.map(c => r[c] !== undefined && r[c] !== '' ? r[c] : ''))
+    ];
+
+    const ws    = XLSX.utils.aoa_to_sheet(aoa);
     const range = XLSX.utils.decode_range(ws['!ref']);
-    const qtyIdx = cols.indexOf(qtyColName);
+    const qtyIdx = originalCols.indexOf(qtyColName);
 
     for (let R = range.s.r; R <= range.e.r; R++) {
       for (let C = range.s.c; C <= range.e.c; C++) {
@@ -1656,22 +1654,12 @@ function mvDownloadPendingPartialRequest() {
         }
       }
     }
-    ws['!cols']   = cols.map(k => ({ wch: Math.max(14, Math.min(k.length + 6, 40)) }));
+    ws['!cols']   = originalCols.map(k => ({ wch: Math.max(14, Math.min(k.length + 6, 40)) }));
     ws['!freeze'] = { xSplit:0, ySplit:1, topLeftCell:'A2', activePane:'bottomLeft', state:'frozen' };
 
+    // ── Single sheet only — exact Part Request format ──
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Pending & Partial Requests');
-
-    // Also add a tiny info sheet
-    const infoRows = [
-      { 'Info': 'Source', 'Value': 'Movement Tracker — Pending & Partial Parts' },
-      { 'Info': 'Total Rows', 'Value': outputRows.length },
-      { 'Info': 'Note', 'Value': 'Quantity = Remaining (not yet moved). Same format as original Part Request.' },
-      { 'Info': 'Generated Date', 'Value': dateStr },
-      { 'Info': 'Generated Time', 'Value': timeStr }
-    ];
-    const wsInfo = XLSX.utils.json_to_sheet(infoRows);
-    XLSX.utils.book_append_sheet(wb, wsInfo, 'Info');
+    XLSX.utils.book_append_sheet(wb, ws, 'Part Request');
 
     wb.Props = { Title: 'Pending & Partial Part Requests', Subject: 'Pending & Partial Part Requests for FIFO' };
     XLSX.writeFile(wb, `PENDING_PARTIAL_PART_REQUEST_${stamp}.xlsx`);
@@ -1682,3 +1670,4 @@ function mvDownloadPendingPartialRequest() {
     console.error(err);
   }
 }
+
