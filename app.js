@@ -1604,52 +1604,26 @@ function mvDownloadPendingPartialRequest() {
       rawMap.get(key).push(row);
     }
 
-    // Build output rows — same columns as original, Quantity replaced with remaining qty
+    // Build output rows — ONE ROW per Pending/Partial result (count always matches report)
+    // Use first matching original row as column template, replace Quantity with remaining qty
     const outputRows = [];
     for (const item of needAction) {
-      const key = item.partCode.toUpperCase() + '||' + item.srcLoc.toUpperCase();
+      const key          = item.partCode.toUpperCase() + '||' + item.srcLoc.toUpperCase();
       const matchingRows = rawMap.get(key) || [];
-
       const remainingQty = item.pendingQty; // reqQty - movedQty
 
       if (matchingRows.length === 0) {
-        // Fallback: build a minimal row if no original found
+        // Fallback: build minimal row if no original found
         const fallback = {};
         if (partColName) fallback[partColName] = item.partCode;
         if (srcColName)  fallback[srcColName]  = item.srcLoc;
         if (qtyColName)  fallback[qtyColName]  = remainingQty;
         outputRows.push(fallback);
-        continue;
-      }
-
-      if (matchingRows.length === 1) {
-        // Single row — just replace qty
+      } else {
+        // Always ONE row — take first original row as template, update Quantity only
         const out = { ...matchingRows[0] };
         if (qtyColName) out[qtyColName] = remainingQty;
         outputRows.push(out);
-      } else {
-        // Multiple original rows for same part+location —
-        // distribute remaining qty proportionally across rows
-        const totalOrigQty = matchingRows.reduce((s, r) => s + (parseFloat(r[qtyColName] || 0) || 0), 0);
-        let distributed = 0;
-
-        matchingRows.forEach((row, idx) => {
-          const out = { ...row };
-          if (qtyColName) {
-            if (totalOrigQty > 0) {
-              const origQty = parseFloat(row[qtyColName] || 0) || 0;
-              const isLast  = idx === matchingRows.length - 1;
-              const share   = isLast
-                ? Math.max(0, remainingQty - distributed)
-                : Math.round((origQty / totalOrigQty) * remainingQty);
-              out[qtyColName] = share;
-              distributed += share;
-            } else {
-              out[qtyColName] = idx === 0 ? remainingQty : 0;
-            }
-          }
-          if (out[qtyColName] > 0) outputRows.push(out);
-        });
       }
     }
 
