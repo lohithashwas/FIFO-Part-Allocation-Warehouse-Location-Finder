@@ -25,6 +25,26 @@ const state = {
   results: { fulfilled: [], shortages: [], summary: {} }
 };
 
+// ─── MODE SWITCHER ────────────────────────────────────────────
+function switchMode(mode) {
+  const fifoEl  = document.getElementById('section-fifo');
+  const mvEl    = document.getElementById('section-movement');
+  const btnFifo = document.getElementById('mode-btn-fifo');
+  const btnMv   = document.getElementById('mode-btn-movement');
+
+  if (mode === 'fifo') {
+    fifoEl.style.display  = '';
+    mvEl.style.display    = 'none';
+    btnFifo.classList.add('active');
+    btnMv.classList.remove('active');
+  } else {
+    fifoEl.style.display  = 'none';
+    mvEl.style.display    = '';
+    btnMv.classList.add('active');
+    btnFifo.classList.remove('active');
+  }
+}
+
 // ─── DATE HELPERS ─────────────────────────────────────────────
 function parseExcelDate(val) {
   if (val == null || val === '') return new Date(0);
@@ -1134,3 +1154,412 @@ function resetAll() {
 
 // ─── INIT ─────────────────────────────────────────────────────
 updateProcessBtn();
+
+/* ============================================================
+   MOVEMENT TRACKER  (Section B)
+   ============================================================ */
+
+// ─── MV State ─────────────────────────────────────────────────
+const mvState = {
+  files:   { request: null, movement: null },
+  data:    { requests: [], movements: [] },
+  results: []
+};
+
+// ─── MV Drag & Drop ───────────────────────────────────────────
+['request', 'movement'].forEach(type => {
+  const zone  = document.getElementById(`mv-drop-${type}`);
+  const input = document.getElementById(`mv-file-${type}`);
+
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault(); zone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) mvHandleFile(type, file);
+  });
+  input.addEventListener('change', () => { if (input.files[0]) mvHandleFile(type, input.files[0]); });
+});
+
+// ─── MV File Handling ─────────────────────────────────────────
+function mvHandleFile(type, file) {
+  mvClearError(type);
+  if (!file.name.match(/\.xlsx$/i)) {
+    mvShowError(type, 'Only .xlsx files are accepted.');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb   = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+      const ws   = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+      if (rows.length === 0) { mvShowError(type, 'File is empty or has no data rows.'); return; }
+
+      // Column checks (flexible matching)
+      const colsLower = Object.keys(rows[0]).map(k => k.trim().toLowerCase());
+      if (type === 'request') {
+        const need = ['part code', 'quantity'];
+        const missing = need.filter(n => !colsLower.includes(n));
+        if (missing.length) { mvShowError(type, `Missing columns: ${missing.join(', ')}`); return; }
+      } else {
+        // movement: needs Part Code and Quantity
+        const need = ['part code', 'quantity'];
+        const missing = need.filter(n => !colsLower.includes(n));
+        if (missing.length) { mvShowError(type, `Missing columns: ${missing.join(', ')}`); return; }
+      }
+
+      mvState.files[type] = file;
+      if (type === 'request')  mvState.data.requests  = rows;
+      if (type === 'movement') mvState.data.movements = rows;
+
+      document.getElementById(`mv-fp-${type}-name`).textContent = file.name;
+      document.getElementById(`mv-fp-${type}-rows`).textContent = `${rows.length.toLocaleString()} rows`;
+      document.getElementById(`mv-fp-${type}`).classList.add('visible');
+      document.getElementById(`mv-card-${type}`).classList.add('has-file');
+      document.getElementById(`mv-card-${type}`).classList.remove('has-error');
+
+      mvUpdateBtn();
+      showToast(`${type === 'request' ? 'Part Request List' : 'Movement Excel'} loaded (${rows.length.toLocaleString()} rows)`, 'success');
+    } catch (err) {
+      mvShowError(type, `Could not read file: ${err.message}`);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function mvRemoveFile(type) {
+  mvState.files[type] = null;
+  if (type === 'request')  mvState.data.requests  = [];
+  if (type === 'movement') mvState.data.movements = [];
+  document.getElementById(`mv-fp-${type}`).classList.remove('visible');
+  document.getElementById(`mv-card-${type}`).classList.remove('has-file', 'has-error');
+  document.getElementById(`mv-file-${type}`).value = '';
+  mvClearError(type);
+  mvUpdateBtn();
+}
+
+function mvUpdateBtn() {
+  const all = mvState.files.request && mvState.files.movement;
+  const btn = document.getElementById('mv-process-btn');
+  const status = document.getElementById('mv-upload-status');
+  btn.disabled = !all;
+  const cnt = [mvState.files.request, mvState.files.movement].filter(Boolean).length;
+  status.textContent = all ? 'Both files ready — click Check Movement Status'
+                           : `${cnt}/2 files uploaded`;
+}
+
+function mvShowError(type, msg) {
+  const el = document.getElementById(`mv-err-${type}`);
+  el.textContent = msg; el.classList.add('visible');
+  document.getElementById(`mv-card-${type}`).classList.add('has-error');
+  document.getElementById(`mv-card-${type}`).classList.remove('has-file');
+}
+function mvClearError(type) {
+  const el = document.getElementById(`mv-err-${type}`);
+  el.textContent = ''; el.classList.remove('visible');
+}
+
+// ─── Flexible column finder ────────────────────────────────────
+function mvFindCol(row, ...candidates) {
+  const keys = Object.keys(row);
+  for (const c of candidates) {
+    const found = keys.find(k => k.trim().toLowerCase() === c.toLowerCase());
+    if (found !== undefined) return row[found];
+  }
+  return '';
+}
+
+// ─── MV PROCESS ENGINE ────────────────────────────────────────
+async function processMovement() {
+  if (!mvState.files.request || !mvState.files.movement) {
+    showToast('Please upload both files first.', 'error'); return;
+  }
+
+  document.getElementById('mv-loading-overlay').hidden = false;
+  document.getElementById('mv-results-section').hidden = true;
+  document.getElementById('mv-process-btn').disabled   = true;
+  await new Promise(r => setTimeout(r, 50));
+
+  try {
+    document.getElementById('mv-loading-sub').textContent = 'Building movement map…';
+    await new Promise(r => setTimeout(r, 20));
+
+    const reqRows = mvState.data.requests;
+    const movRows = mvState.data.movements;
+
+    // ── Step 1: Aggregate MOVEMENT by (PartCode + ToLocation) ──
+    // Key: partCode|toLocation → total moved qty
+    const movMap = new Map();
+    for (const row of movRows) {
+      const partCode  = String(mvFindCol(row, 'Part Code', 'PartCode', 'part code', 'PART CODE') || '').trim().toUpperCase();
+      const toLoc     = String(mvFindCol(row, 'To Location', 'ToLocation', 'to location', 'TO LOCATION', 'Destination', 'To Loc') || '').trim();
+      const qty       = parseFloat(mvFindCol(row, 'Quantity', 'Qty', 'quantity') || 0) || 0;
+      if (!partCode || qty <= 0) continue;
+      const key = partCode + '||' + toLoc.toUpperCase();
+      movMap.set(key, (movMap.get(key) || 0) + qty);
+    }
+
+    // ── Step 2: Aggregate REQUEST by (PartCode + SourceLocation) ──
+    // Key: partCode|sourceLoc → total requested qty
+    const reqMap = new Map();
+    for (const row of reqRows) {
+      const partCode = String(mvFindCol(row, 'Part Code', 'PartCode', 'part code', 'PART CODE') || '').trim().toUpperCase();
+      const srcLoc   = String(mvFindCol(row, 'Source Location', 'SourceLocation', 'source location', 'SOURCE LOCATION', 'Source Loc') || '').trim();
+      const qty      = parseFloat(mvFindCol(row, 'Quantity', 'Qty', 'quantity') || 0) || 0;
+      if (!partCode || qty <= 0) continue;
+      const key = partCode + '||' + srcLoc.toUpperCase();
+      if (!reqMap.has(key)) reqMap.set(key, { partCode, srcLoc, reqQty: 0 });
+      reqMap.get(key).reqQty += qty;
+    }
+
+    // ── Step 3: For each request key, look up movement ──────────
+    const results = [];
+    for (const [key, req] of reqMap) {
+      const movedQty  = movMap.get(key) || 0;
+      const pendingQty = Math.max(0, req.reqQty - movedQty);
+
+      let status;
+      if (movedQty === 0) {
+        status = 'Pending';
+      } else if (movedQty >= req.reqQty) {
+        status = 'Fulfilled';
+      } else {
+        status = 'Partial';
+      }
+
+      results.push({
+        partCode:   req.partCode,
+        srcLoc:     req.srcLoc,
+        reqQty:     req.reqQty,
+        movedQty,
+        pendingQty,
+        status
+      });
+    }
+
+    mvState.results = results;
+
+    // ── Summary counts ──────────────────────────────────────────
+    const total     = results.length;
+    const fulfilled = results.filter(r => r.status === 'Fulfilled').length;
+    const partial   = results.filter(r => r.status === 'Partial').length;
+    const pending   = results.filter(r => r.status === 'Pending').length;
+
+    document.getElementById('mv-stat-total').textContent     = total.toLocaleString();
+    document.getElementById('mv-stat-fulfilled').textContent = fulfilled.toLocaleString();
+    document.getElementById('mv-stat-partial').textContent   = partial.toLocaleString();
+    document.getElementById('mv-stat-pending').textContent   = pending.toLocaleString();
+
+    document.getElementById('mv-tc-all').textContent       = total.toLocaleString();
+    document.getElementById('mv-tc-fulfilled').textContent = fulfilled.toLocaleString();
+    document.getElementById('mv-tc-partial').textContent   = partial.toLocaleString();
+    document.getElementById('mv-tc-pending').textContent   = pending.toLocaleString();
+
+    mvRenderTable('all', results);
+
+    document.getElementById('mv-loading-overlay').hidden = true;
+    document.getElementById('mv-results-section').hidden = false;
+    document.getElementById('mv-results-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    showToast(`Done! ${fulfilled} Fulfilled, ${partial} Partial, ${pending} Pending.`, 'success', 6000);
+
+  } catch (err) {
+    document.getElementById('mv-loading-overlay').hidden = true;
+    document.getElementById('mv-process-btn').disabled = false;
+    showToast(`Processing error: ${err.message}`, 'error', 7000);
+    console.error(err);
+  }
+}
+
+// ─── MV Render Table ──────────────────────────────────────────
+const MV_MAX_PREVIEW = 500;
+
+function mvRenderTable(tab, rows) {
+  const tbody  = document.getElementById('mv-tbody-all');
+  const footer = document.getElementById('mv-footer-all');
+  tbody.innerHTML = '';
+
+  const preview = rows.slice(0, MV_MAX_PREVIEW);
+
+  if (preview.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:32px;color:var(--grey-text)">No records for this filter.</td></tr>`;
+    footer.textContent = '';
+    return;
+  }
+
+  preview.forEach(row => {
+    const tr = document.createElement('tr');
+    const badgeClass = row.status === 'Fulfilled' ? 'badge-fulfilled'
+                     : row.status === 'Partial'   ? 'badge-partial'
+                     : 'badge-pending';
+    const icon = row.status === 'Fulfilled' ? '✅' : row.status === 'Partial' ? '⚠️' : '🔴';
+    tr.innerHTML = `
+      <td><strong>${esc(row.partCode)}</strong></td>
+      <td>${esc(row.srcLoc) || '—'}</td>
+      <td style="font-weight:600">${fmt(row.reqQty)}</td>
+      <td style="font-weight:600;color:var(--green)">${fmt(row.movedQty)}</td>
+      <td style="font-weight:700;color:var(--red)">${row.pendingQty > 0 ? fmt(row.pendingQty) : '—'}</td>
+      <td><span class="badge ${badgeClass}">${icon} ${row.status}</span></td>`;
+    tbody.appendChild(tr);
+  });
+
+  footer.textContent = rows.length > MV_MAX_PREVIEW
+    ? `Showing first ${MV_MAX_PREVIEW.toLocaleString()} of ${rows.length.toLocaleString()} rows. Download Excel for full data.`
+    : `Showing all ${rows.length.toLocaleString()} rows.`;
+}
+
+// ─── MV Tab Switcher ──────────────────────────────────────────
+function mvSwitchTab(tab) {
+  ['all', 'fulfilled', 'partial', 'pending'].forEach(t => {
+    const btn = document.getElementById(`mv-tab-${t}`);
+    if (btn) btn.classList.toggle('active', t === tab);
+  });
+
+  // Filter rows based on tab
+  let rows = mvState.results;
+  if (tab === 'fulfilled') rows = rows.filter(r => r.status === 'Fulfilled');
+  if (tab === 'partial')   rows = rows.filter(r => r.status === 'Partial');
+  if (tab === 'pending')   rows = rows.filter(r => r.status === 'Pending');
+  mvRenderTable(tab, rows);
+}
+
+// ─── MV Excel Download ────────────────────────────────────────
+function mvDownloadExcel() {
+  try {
+    const results = mvState.results;
+    if (!results || results.length === 0) {
+      showToast('No results to download.', 'error'); return;
+    }
+
+    const now  = new Date();
+    const dateStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
+
+    const wb = XLSX.utils.book_new();
+
+    // ── Build STATUS sheet rows ──────────────────────────────────
+    const allRows = results.map(r => ({
+      'Part Code':       r.partCode,
+      'Source Location': r.srcLoc,
+      'Requested Qty':   r.reqQty,
+      'Moved Qty':       r.movedQty,
+      'Pending Qty':     r.pendingQty,
+      'Status':          r.status,
+      'Generated Date':  dateStr,
+      'Generated Time':  timeStr
+    }));
+
+    const fulfilledRows = results.filter(r => r.status === 'Fulfilled').map(r => ({
+      'Part Code':       r.partCode,
+      'Source Location': r.srcLoc,
+      'Requested Qty':   r.reqQty,
+      'Moved Qty':       r.movedQty,
+      'Pending Qty':     0,
+      'Status':          r.status,
+      'Generated Date':  dateStr,
+      'Generated Time':  timeStr
+    }));
+
+    const partialRows = results.filter(r => r.status === 'Partial').map(r => ({
+      'Part Code':       r.partCode,
+      'Source Location': r.srcLoc,
+      'Requested Qty':   r.reqQty,
+      'Moved Qty':       r.movedQty,
+      'Pending Qty':     r.pendingQty,
+      'Status':          r.status,
+      'Generated Date':  dateStr,
+      'Generated Time':  timeStr
+    }));
+
+    const pendingRows = results.filter(r => r.status === 'Pending').map(r => ({
+      'Part Code':       r.partCode,
+      'Source Location': r.srcLoc,
+      'Requested Qty':   r.reqQty,
+      'Moved Qty':       0,
+      'Pending Qty':     r.reqQty,
+      'Status':          r.status,
+      'Generated Date':  dateStr,
+      'Generated Time':  timeStr
+    }));
+
+    // ── Summary sheet data ───────────────────────────────────────
+    const summaryRows = [
+      { 'Category': 'Total Part Requests',  'Count': results.length },
+      { 'Category': 'Fulfilled',            'Count': fulfilledRows.length },
+      { 'Category': 'Partial',              'Count': partialRows.length },
+      { 'Category': 'Pending (Not Done)',   'Count': pendingRows.length },
+      { 'Category': 'Generated Date',       'Count': dateStr },
+      { 'Category': 'Generated Time',       'Count': timeStr }
+    ];
+
+    // ── Style helpers ─────────────────────────────────────────────
+    const ALN   = { horizontal: 'center', vertical: 'center', wrapText: true };
+    const BRD   = { top: { style:'medium', color:{rgb:'A0AAB5'} }, bottom: { style:'medium', color:{rgb:'A0AAB5'} }, left: { style:'medium', color:{rgb:'A0AAB5'} }, right: { style:'medium', color:{rgb:'A0AAB5'} } };
+    const HDR   = { fill:{patternType:'solid',fgColor:{rgb:'0A1F44'}}, font:{bold:true,color:{rgb:'FFFFFF'},sz:11}, alignment:ALN, border:BRD };
+    const CELL_ODD  = { fill:{patternType:'solid',fgColor:{rgb:'FFFFFF'}}, alignment:ALN, border:BRD };
+    const CELL_EVEN = { fill:{patternType:'solid',fgColor:{rgb:'F4F6FA'}}, alignment:ALN, border:BRD };
+    const CELL_GREEN= { fill:{patternType:'solid',fgColor:{rgb:'D1FAE5'}}, font:{bold:true,color:{rgb:'065F46'}}, alignment:ALN, border:BRD };
+    const CELL_ORG  = { fill:{patternType:'solid',fgColor:{rgb:'FEF3C7'}}, font:{bold:true,color:{rgb:'92400E'}}, alignment:ALN, border:BRD };
+    const CELL_RED  = { fill:{patternType:'solid',fgColor:{rgb:'FEE2E2'}}, font:{bold:true,color:{rgb:'991B1B'}}, alignment:ALN, border:BRD };
+
+    function styleSheet(rows, statusCol) {
+      if (!rows || rows.length === 0) return XLSX.utils.json_to_sheet([{ Note: 'No data.' }]);
+      const cols = Object.keys(rows[0]);
+      const aoa  = [cols, ...rows.map(r => cols.map(c => r[c] != null ? r[c] : ''))];
+      const ws   = XLSX.utils.aoa_to_sheet(aoa);
+      const range = XLSX.utils.decode_range(ws['!ref']);
+
+      for (let R = range.s.r; R <= range.e.r; R++) {
+        for (let C = range.s.c; C <= range.e.c; C++) {
+          const addr = XLSX.utils.encode_cell({ r: R, c: C });
+          if (!ws[addr]) ws[addr] = { v: '', t: 's' };
+          if (R === 0) {
+            ws[addr].s = HDR;
+          } else {
+            // Status cell gets colour
+            const statusIdx = cols.indexOf(statusCol || 'Status');
+            const statusVal = statusIdx >= 0 ? (aoa[R][statusIdx] || '') : '';
+            if (statusCol && C === statusIdx) {
+              ws[addr].s = statusVal === 'Fulfilled' ? CELL_GREEN
+                         : statusVal === 'Partial'   ? CELL_ORG
+                         : statusVal === 'Pending'   ? CELL_RED
+                         : (R % 2 === 0 ? CELL_EVEN : CELL_ODD);
+            } else {
+              ws[addr].s = R % 2 === 0 ? CELL_EVEN : CELL_ODD;
+            }
+          }
+        }
+      }
+      ws['!cols'] = cols.map(k => ({ wch: Math.max(14, Math.min(k.length + 6, 40)) }));
+      ws['!freeze'] = { xSplit:0, ySplit:1, topLeftCell:'A2', activePane:'bottomLeft', state:'frozen' };
+      return ws;
+    }
+
+    // ── Append sheets ────────────────────────────────────────────
+    XLSX.utils.book_append_sheet(wb, styleSheet(allRows, 'Status'),            'All Parts');
+    XLSX.utils.book_append_sheet(wb, styleSheet(fulfilledRows, 'Status'),      'Fulfilled');
+    XLSX.utils.book_append_sheet(wb, styleSheet(partialRows, 'Status'),        'Partial');
+    XLSX.utils.book_append_sheet(wb, styleSheet(pendingRows, 'Status'),        'Pending');
+    XLSX.utils.book_append_sheet(wb, styleSheet(summaryRows, null),            'Summary');
+
+    wb.Props = { Title: 'PART REQUEST vs MOVEMENT STATUS', Subject: 'PART REQUEST vs MOVEMENT STATUS' };
+    XLSX.writeFile(wb, `PART_REQUEST_vs_MOVEMENT_STATUS_${stamp}.xlsx`);
+    showToast('Movement Status Excel downloaded!', 'success', 5000);
+
+  } catch (err) {
+    showToast(`Export error: ${err.message}`, 'error');
+    console.error(err);
+  }
+}
+
+// ─── MV Reset ─────────────────────────────────────────────────
+function mvReset() {
+  ['request', 'movement'].forEach(mvRemoveFile);
+  document.getElementById('mv-results-section').hidden = true;
+  document.getElementById('mv-process-btn').disabled   = true;
+  mvState.results = [];
+  document.getElementById('mv-upload-section').scrollIntoView({ behavior: 'smooth' });
+  showToast('Ready for a new check.', 'info');
+}

@@ -419,3 +419,87 @@ body {
   .summary-grid { grid-template-columns: 1fr; }
   .hero { padding: 36px 16px 32px; }
 }
+
+/* ── MODE SELECTOR ── */
+.mode-selector-wrap {
+  background: var(--navy-dark);
+  padding: 28px 24px;
+  display: flex; justify-content: center;
+}
+.mode-selector {
+  display: flex; align-items: center; gap: 20px;
+  flex-wrap: wrap; justify-content: center;
+  max-width: 800px; width: 100%;
+}
+.mode-btn {
+  display: flex; align-items: center; gap: 14px;
+  background: rgba(255,255,255,.06);
+  border: 2px solid rgba(255,255,255,.15);
+  border-radius: 14px; padding: 16px 24px;
+  cursor: pointer; transition: all .25s;
+  color: rgba(255,255,255,.7);
+  font-family: inherit;
+  flex: 1; min-width: 220px; max-width: 340px;
+  text-align: left;
+}
+.mode-btn:hover {
+  background: rgba(255,255,255,.1);
+  border-color: rgba(255,255,255,.3);
+  color: white;
+  transform: translateY(-2px);
+}
+.mode-btn.active {
+  background: var(--blue-accent);
+  border-color: var(--blue-accent);
+  color: white;
+  box-shadow: 0 4px 20px rgba(37,99,235,.4);
+}
+.mode-btn-icon { flex-shrink: 0; }
+.mode-btn-text { display: flex; flex-direction: column; gap: 3px; }
+.mode-btn-title { font-size: 1rem; font-weight: 700; }
+.mode-btn-sub   { font-size: .75rem; opacity: .75; }
+.mode-divider {
+  color: rgba(255,255,255,.4); font-size: .85rem;
+  font-weight: 700; letter-spacing: 1px;
+  flex-shrink: 0;
+}
+
+/* ── SECTION LABEL BADGE ── */
+.section-label-badge {
+  display: inline-block;
+  background: var(--navy); color: white;
+  font-size: .7rem; font-weight: 700; letter-spacing: .5px;
+  text-transform: uppercase; padding: 4px 12px;
+  border-radius: 20px; margin-bottom: 10px;
+}
+.section-label-badge.mv {
+  background: #7C3AED;
+}
+
+/* ── MOVEMENT CARD ACCENTS ── */
+.mv-card { border-color: #C4B5FD !important; }
+.mv-card.has-file { border-color: var(--green) !important; }
+.mv-card.has-error { border-color: var(--red) !important; }
+.mv-num {
+  background: #7C3AED !important;
+  font-size: 1rem !important;
+}
+.mv-process-btn {
+  background: #7C3AED !important;
+  border-color: #7C3AED !important;
+}
+.mv-process-btn:hover:not(:disabled) {
+  background: #6D28D9 !important;
+  border-color: #6D28D9 !important;
+}
+
+/* Movement status badges */
+.badge-fulfilled { background: #D1FAE5; color: #065F46; }
+.badge-partial   { background: #FEF3C7; color: #92400E; }
+.badge-pending   { background: #FEE2E2; color: #991B1B; }
+
+@media (max-width: 640px) {
+  .mode-selector { flex-direction: column; }
+  .mode-btn { max-width: 100%; }
+  .mode-divider { transform: rotate(90deg); }
+}
