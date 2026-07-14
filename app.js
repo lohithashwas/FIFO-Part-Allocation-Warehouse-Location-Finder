@@ -1283,35 +1283,35 @@ async function processMovement() {
     const reqRows = mvState.data.requests;
     const movRows = mvState.data.movements;
 
-    // ── Step 1: Aggregate MOVEMENT by (PartCode + ToLocation) ──
-    // Key: partCode|toLocation → total moved qty
+    // ── Step 1: Aggregate MOVEMENT by Part Code + To Location ──
+    // Only rows with SAME Part Code AND SAME To Location are summed
     const movMap = new Map();
     for (const row of movRows) {
-      const partCode  = String(mvFindCol(row, 'Part Code', 'Part No', 'PartCode', 'PartNo', 'part code', 'part no', 'PART CODE', 'PART NO') || '').trim().toUpperCase();
-      const toLoc     = String(mvFindCol(row, 'To Location', 'ToLocation', 'to location', 'TO LOCATION', 'Destination', 'To Loc') || '').trim();
-      const qty       = parseFloat(mvFindCol(row, 'Quantity', 'Qty', 'quantity') || 0) || 0;
+      const partCode = String(mvFindCol(row, 'Part Code', 'Part No', 'PartCode', 'PartNo', 'part code', 'part no', 'PART CODE', 'PART NO') || '').trim().toUpperCase();
+      const toLoc    = String(mvFindCol(row, 'To Location', 'ToLocation', 'to location', 'TO LOCATION', 'Destination', 'To Loc') || '').trim().toUpperCase();
+      const qty      = parseFloat(mvFindCol(row, 'Quantity', 'Qty', 'quantity') || 0) || 0;
       if (!partCode || qty <= 0) continue;
-      const key = partCode + '||' + toLoc.toUpperCase();
+      const key = partCode + '||' + toLoc;
       movMap.set(key, (movMap.get(key) || 0) + qty);
     }
 
-    // ── Step 2: Aggregate REQUEST by (PartCode + SourceLocation) ──
-    // Key: partCode|sourceLoc → total requested qty
+    // ── Step 2: Aggregate REQUEST by Part Code + Source Location ──
+    // Only rows with SAME Part Code AND SAME Source Location are summed
     const reqMap = new Map();
     for (const row of reqRows) {
       const partCode = String(mvFindCol(row, 'Part Code', 'Part No', 'PartCode', 'PartNo', 'part code', 'part no', 'PART CODE', 'PART NO') || '').trim().toUpperCase();
-      const srcLoc   = String(mvFindCol(row, 'Source Location', 'SourceLocation', 'source location', 'SOURCE LOCATION', 'Source Loc') || '').trim();
+      const srcLoc   = String(mvFindCol(row, 'Source Location', 'SourceLocation', 'source location', 'SOURCE LOCATION', 'Source Loc') || '').trim().toUpperCase();
       const qty      = parseFloat(mvFindCol(row, 'Quantity', 'Qty', 'quantity') || 0) || 0;
       if (!partCode || qty <= 0) continue;
-      const key = partCode + '||' + srcLoc.toUpperCase();
+      const key = partCode + '||' + srcLoc;
       if (!reqMap.has(key)) reqMap.set(key, { partCode, srcLoc, reqQty: 0 });
       reqMap.get(key).reqQty += qty;
     }
 
-    // ── Step 3: For each request key, look up movement ──────────
+    // ── Step 3: Match each request (Part+Location) against movement ──
     const results = [];
     for (const [key, req] of reqMap) {
-      const movedQty  = movMap.get(key) || 0;
+      const movedQty   = movMap.get(key) || 0;   // same Part Code + same Location
       const pendingQty = Math.max(0, req.reqQty - movedQty);
 
       let status;
