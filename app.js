@@ -1197,18 +1197,12 @@ function mvHandleFile(type, file) {
 
       if (rows.length === 0) { mvShowError(type, 'File is empty or has no data rows.'); return; }
 
-      // Column checks (flexible matching)
+      // Column checks (flexible matching — accepts 'Part Code' OR 'Part No')
       const colsLower = Object.keys(rows[0]).map(k => k.trim().toLowerCase());
-      if (type === 'request') {
-        const need = ['part code', 'quantity'];
-        const missing = need.filter(n => !colsLower.includes(n));
-        if (missing.length) { mvShowError(type, `Missing columns: ${missing.join(', ')}`); return; }
-      } else {
-        // movement: needs Part Code and Quantity
-        const need = ['part code', 'quantity'];
-        const missing = need.filter(n => !colsLower.includes(n));
-        if (missing.length) { mvShowError(type, `Missing columns: ${missing.join(', ')}`); return; }
-      }
+      const hasPartCol = colsLower.includes('part code') || colsLower.includes('part no');
+      const hasQty     = colsLower.includes('quantity') || colsLower.includes('qty');
+      if (!hasPartCol) { mvShowError(type, `Missing column: 'Part Code' or 'Part No'`); return; }
+      if (!hasQty)     { mvShowError(type, `Missing column: 'Quantity'`); return; }
 
       mvState.files[type] = file;
       if (type === 'request')  mvState.data.requests  = rows;
@@ -1293,7 +1287,7 @@ async function processMovement() {
     // Key: partCode|toLocation → total moved qty
     const movMap = new Map();
     for (const row of movRows) {
-      const partCode  = String(mvFindCol(row, 'Part Code', 'PartCode', 'part code', 'PART CODE') || '').trim().toUpperCase();
+      const partCode  = String(mvFindCol(row, 'Part Code', 'Part No', 'PartCode', 'PartNo', 'part code', 'part no', 'PART CODE', 'PART NO') || '').trim().toUpperCase();
       const toLoc     = String(mvFindCol(row, 'To Location', 'ToLocation', 'to location', 'TO LOCATION', 'Destination', 'To Loc') || '').trim();
       const qty       = parseFloat(mvFindCol(row, 'Quantity', 'Qty', 'quantity') || 0) || 0;
       if (!partCode || qty <= 0) continue;
@@ -1305,7 +1299,7 @@ async function processMovement() {
     // Key: partCode|sourceLoc → total requested qty
     const reqMap = new Map();
     for (const row of reqRows) {
-      const partCode = String(mvFindCol(row, 'Part Code', 'PartCode', 'part code', 'PART CODE') || '').trim().toUpperCase();
+      const partCode = String(mvFindCol(row, 'Part Code', 'Part No', 'PartCode', 'PartNo', 'part code', 'part no', 'PART CODE', 'PART NO') || '').trim().toUpperCase();
       const srcLoc   = String(mvFindCol(row, 'Source Location', 'SourceLocation', 'source location', 'SOURCE LOCATION', 'Source Loc') || '').trim();
       const qty      = parseFloat(mvFindCol(row, 'Quantity', 'Qty', 'quantity') || 0) || 0;
       if (!partCode || qty <= 0) continue;
