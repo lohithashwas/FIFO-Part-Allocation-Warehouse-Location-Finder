@@ -200,6 +200,8 @@ function clearError(type) {
 function buildSupplyPool(inventoryRows, containerRows) {
   // pool: Map<partCode, Array<batch>>
   const pool = new Map();
+  // blockedMap: Map<partCode, Array<{qty, location}>> — BLOCKED=TRUE rows only (informational)
+  const blockedMap = new Map();
 
   const addBatch = (partCode, batch) => {
     if (!pool.has(partCode)) pool.set(partCode, []);
@@ -235,7 +237,19 @@ function buildSupplyPool(inventoryRows, containerRows) {
     const _blockedKey = Object.keys(row).find(k => k.trim().toUpperCase() === 'BLOCKED');
     const blocked = _blockedKey ? row[_blockedKey] : undefined;
     // Only skip if strictly TRUE (boolean true, numeric 1, or string "TRUE"); FALSE/blank pass through
-    if (blocked === true || blocked === 1 || String(blocked).trim().toUpperCase() === 'TRUE') continue;
+    const isBlocked = blocked === true || blocked === 1 || String(blocked).trim().toUpperCase() === 'TRUE';
+    if (isBlocked) {
+      // Capture for the shortage report — blocked stock IS in storage but cannot be allocated
+      const blockedQty = parseFloat(row['Quantity']) || 0;
+      if (blockedQty > 0) {
+        if (!blockedMap.has(code)) blockedMap.set(code, []);
+        blockedMap.get(code).push({
+          qty:      blockedQty,
+          location: String(row['Location'] || row['Type Location'] || '').trim()
+        });
+      }
+      continue;
+    }
     const qty = parseFloat(row['Quantity']) || 0;
     if (qty <= 0) continue;
 
@@ -330,11 +344,12 @@ function buildSupplyPool(inventoryRows, containerRows) {
   for (const [, batches] of pool) {
     batches.sort((a, b) => a.orderDate - b.orderDate);
   }
-  return pool;
+  return { pool, blockedMap };
 }
 
 // Build Combined Shortages report: for each shortage, find matching parts in container data
-function buildCombinedShortages(shortages, containerRows) {
+// Also enriches each row with BLOCKED inventory quantities (informational — cannot be allocated)
+function buildCombinedShortages(shortages, containerRows, blockedMap) {
   if (!containerRows || containerRows.length === 0) return { combined: shortages, partsWithTransitCount: 0 };
 
   // Resolve C/T No column key dynamically — strip ALL non-alphanumeric so any
@@ -399,6 +414,11 @@ function buildCombinedShortages(shortages, containerRows) {
       netStatus = `Short: ${fmt(netShort)} | In Transit: ${fmt(totalTransit)}`;
     }
     
+    // ── Blocked stock info ──────────────────────────────────────
+    const blockedBatches = (blockedMap && blockedMap.get(partCode)) || [];
+    const totalBlockedQty = blockedBatches.reduce((s, b) => s + b.qty, 0);
+    const blockedLocations = [...new Set(blockedBatches.map(b => b.location).filter(Boolean))].join(', ');
+
     if (containers.length === 0) {
       combined.push({
         ...shortage,
@@ -406,7 +426,9 @@ function buildCombinedShortages(shortages, containerRows) {
         'Container No.': '',
         'In Transit Qty': '',
         'Container Status': '',
-        'Port ETA': ''
+        'Port ETA': '',
+        'Blocked Qty in Storage': totalBlockedQty > 0 ? totalBlockedQty : '',
+        'Blocked Storage Locations': blockedLocations || ''
       });
       continue;
     }
@@ -416,11 +438,13 @@ function buildCombinedShortages(shortages, containerRows) {
     for (const row of containers) {
       combined.push({
         ...shortage,
-        'Net Status':        netStatus,
-        'Container No.':     row._ctNo,
-        'In Transit Qty':    parseFloat(row['Quantity']) || 0,
-        'Container Status':  String(row['Status'] || '').trim(),
-        'Port ETA':          String(row['Port ETA'] || '').trim()
+        'Net Status':               netStatus,
+        'Container No.':            row._ctNo,
+        'In Transit Qty':           parseFloat(row['Quantity']) || 0,
+        'Container Status':         String(row['Status'] || '').trim(),
+        'Port ETA':                 String(row['Port ETA'] || '').trim(),
+        'Blocked Qty in Storage':   totalBlockedQty > 0 ? totalBlockedQty : '',
+        'Blocked Storage Locations': blockedLocations || ''
       });
     }
   }
@@ -587,15 +611,15 @@ async function processFiles() {
   try {
     setLoadingSub('Building FIFO supply pool from Inventory & Containers…');
     await new Promise(r => setTimeout(r, 20));
-    const pool = buildSupplyPool(state.data.inventory, state.data.containers);
+    const { pool, blockedMap } = buildSupplyPool(state.data.inventory, state.data.containers);
 
     setLoadingSub(`Processing ${state.data.requests.length.toLocaleString()} part requests (FIFO)…`);
     await new Promise(r => setTimeout(r, 20));
     const { fulfilled, shortages } = runFIFO(state.data.requests, pool);
 
-    setLoadingSub('Cross-checking shortages against in-transit containers…');
+    setLoadingSub('Cross-checking shortages against in-transit containers & blocked storage…');
     await new Promise(r => setTimeout(r, 20));
-    const { combined, partsWithTransitCount } = buildCombinedShortages(shortages, state.data.containers);
+    const { combined, partsWithTransitCount } = buildCombinedShortages(shortages, state.data.containers, blockedMap);
 
     state.results.fulfilled  = fulfilled;
     state.results.shortages  = combined; // Using the new combined list
@@ -723,6 +747,8 @@ function renderTable(type, rows) {
     preview.forEach(row => {
       const tr = document.createElement('tr');
       const transitQty = row['In Transit Qty'] || '';
+      const blockedQty = row['Blocked Qty in Storage'];
+      const blockedLocs = row['Blocked Storage Locations'];
       
       tr.innerHTML = `
         <td><strong>${esc(row['Part Code'])}</strong></td>
@@ -735,7 +761,9 @@ function renderTable(type, rows) {
         <td style="font-weight:700;color:#2563EB">${fmt(transitQty)}</td>
         <td>${esc(row['Container Status'])}</td>
         <td>${esc(row['Port ETA'])}</td>
-        <td>${esc(row['Destination Location'])}</td>`;
+        <td>${esc(row['Destination Location'])}</td>
+        <td style="font-weight:700;color:#D97706">${blockedQty ? fmt(blockedQty) : '—'}</td>
+        <td style="font-size:0.75rem;color:#92400E">${blockedLocs ? esc(blockedLocs) : '—'}</td>`;
       tbody.appendChild(tr);
     });
   }
@@ -926,7 +954,9 @@ function downloadExcel() {
       // Sheet 2: Shortages
       const shortagePri = [
         'Part Code', 'Part Name', 'Requested Quantity', 'Shortage Quantity', 'Net Status',
-        'Container No.', 'In Transit Qty', 'Container Status', 'Port ETA', 'Source Location', 'Destination Location'
+        'Container No.', 'In Transit Qty', 'Container Status', 'Port ETA',
+        'Blocked Qty in Storage', 'Blocked Storage Locations',
+        'Source Location', 'Destination Location'
       ];
       const ws2 = buildStyledSheet(sRows.length ? sRows : [{ Note: 'No shortages.' }], shortagePri);
       XLSX.utils.book_append_sheet(wb, ws2, 'Shortages');
