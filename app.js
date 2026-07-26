@@ -231,9 +231,11 @@ function buildSupplyPool(inventoryRows, containerRows) {
 
     const code = String(row['Part Code'] || '').trim();
     if (!code) continue;
-    // Exclude blocked rows
-    const blocked = row['Blocked'];
-    if (blocked === true || blocked === 1 || String(blocked).toUpperCase() === 'TRUE') continue;
+    // Exclude blocked rows — resolve column key case-insensitively (BLOCKED / Blocked / blocked)
+    const _blockedKey = Object.keys(row).find(k => k.trim().toUpperCase() === 'BLOCKED');
+    const blocked = _blockedKey ? row[_blockedKey] : undefined;
+    // Only skip if strictly TRUE (boolean true, numeric 1, or string "TRUE"); FALSE/blank pass through
+    if (blocked === true || blocked === 1 || String(blocked).trim().toUpperCase() === 'TRUE') continue;
     const qty = parseFloat(row['Quantity']) || 0;
     if (qty <= 0) continue;
 
