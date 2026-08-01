@@ -54,6 +54,12 @@ function switchMode(mode) {
   }
 }
 
+// ─── PART CODE NORMALIZER ─────────────────────────────────────
+function normPartCode(code) {
+  if (!code) return '';
+  return String(code).replace(/[^A-Z0-9]/gi, '').toUpperCase();
+}
+
 // ─── DATE HELPERS ─────────────────────────────────────────────
 function parseExcelDate(val) {
   if (val == null || val === '') return new Date(0);
@@ -240,8 +246,9 @@ function buildSupplyPool(inventoryRows, containerRows) {
     if (rawInvContainerNo) lastInvContainerNo = rawInvContainerNo;
     const invContainerNo = lastInvContainerNo;
 
-    const code = String(row['Part Code'] || '').trim();
-    if (!code) continue;
+    const rawCode = String(row['Part Code'] || row['Part No'] || row['Material No.'] || row['Material No'] || '').trim();
+    if (!rawCode) continue;
+    const code = normPartCode(rawCode);
     // Exclude blocked rows — resolve column key case-insensitively (BLOCKED / Blocked / blocked)
     const _blockedKey = Object.keys(row).find(k => k.trim().toUpperCase() === 'BLOCKED');
     const blocked = _blockedKey ? row[_blockedKey] : undefined;
@@ -306,8 +313,9 @@ function buildSupplyPool(inventoryRows, containerRows) {
     const containerNo = lastContainerNo;
     // ───────────────────────────────────────────────────────────────────────
 
-    const code = String(row['Part No'] || '').trim();
-    if (!code) continue;
+    const rawCode = String(row['Part No'] || row['Part Code'] || row['Material No.'] || row['Material No'] || '').trim();
+    if (!rawCode) continue;
+    const code = normPartCode(rawCode);
     const qty = parseFloat(row['Quantity']) || 0;
     if (qty <= 0) continue;
 
@@ -386,8 +394,9 @@ function buildCombinedShortages(shortages, containerRows, blockedMap) {
   // Build map: Part No → container rows (ONLY the ones that are in transit/port)
   const ctMap = new Map();
   for (const row of enriched) {
-    const code = String(row['Part No'] || '').trim();
-    if (!code) continue;
+    const rawCode = String(row['Part No'] || row['Part Code'] || row['Material No.'] || row['Material No'] || '').trim();
+    if (!rawCode) continue;
+    const code = normPartCode(rawCode);
 
     const status = String(row['Status'] || '').trim();
     
@@ -407,7 +416,8 @@ function buildCombinedShortages(shortages, containerRows, blockedMap) {
 
   for (const shortage of shortages) {
     const partCode = shortage['Part Code'];
-    const containers = ctMap.get(partCode) || [];
+    const normCode = normPartCode(partCode);
+    const containers = ctMap.get(normCode) || ctMap.get(partCode) || [];
     
     // Calculate net status
     const shortQty = shortage['Shortage Quantity'];
@@ -424,7 +434,7 @@ function buildCombinedShortages(shortages, containerRows, blockedMap) {
     }
     
     // ── Blocked stock info ──────────────────────────────────────
-    const blockedBatches = (blockedMap && blockedMap.get(partCode)) || [];
+    const blockedBatches = (blockedMap && (blockedMap.get(normCode) || blockedMap.get(partCode))) || [];
     const totalBlockedQty = blockedBatches.reduce((s, b) => s + b.qty, 0);
     const blockedLocations = [...new Set(blockedBatches.map(b => b.location).filter(Boolean))].join(', ');
 
@@ -468,9 +478,9 @@ function runFIFO(requests, pool) {
 
   for (const req of requests) {
     reqIdx++;
-    const partCode = String(req['Part Code'] || '').trim();
+    const partCode = String(req['Part Code'] || req['Part No'] || req['Material No.'] || req['Material No'] || '').trim();
     const requestedQty = parseFloat(req['Quantity']) || 0;
-    const partName = String(req['Part Name'] || '').trim();
+    const partName = String(req['Part Name'] || req['Materail Desc.'] || req['Material Desc.'] || '').trim();
     const reqDate  = req['Requested Date'];
 
     // Helper to safely grab column values even if Excel headers have trailing spaces
@@ -480,13 +490,11 @@ function runFIFO(requests, pool) {
       return key ? row[key] : undefined;
     };
 
-    // In the user's Request Excel, the headers are inverted:
-    // 'Destination Location' = The physical warehouse to pull from (KD1 WAREHOUSE, CONT YARD)
-    // 'Source Location' = The assembly line where the parts are going (JOBORDER P1)
     const warehouseToPullFrom = String(getVal(req, 'Destination Location') || '').trim();
     const assemblyLineGoingTo = String(getVal(req, 'Source Location') || '').trim();
 
-    let batches = pool.get(partCode) || [];
+    const normCode = normPartCode(partCode);
+    let batches = pool.get(normCode) || pool.get(partCode) || [];
 
     // STRICT SOURCE MATCHING & SHARED POOLS:
     // 1. KD1 requests STRICTLY pull from KD1 only.

@@ -9,6 +9,12 @@ const ssState = {
   results: { fulfilled: [], shortages: [], summary: {} }
 };
 
+// Helper: Normalize Part Codes for hyphen-insensitive & space-insensitive matching
+function ssNormCode(code) {
+  if (!code) return '';
+  return String(code).replace(/[^A-Z0-9]/gi, '').toUpperCase();
+}
+
 // ─── Drag & Drop Event Handlers ────────────────────────────────
 ['plan', 'inventory', 'container'].forEach(type => {
   const zone  = document.getElementById(`ss-drop-${type}`);
@@ -43,17 +49,20 @@ function ssHandleFile(type, file) {
       if (rows.length === 0) { ssShowError(type, 'File is empty or has no data rows.'); return; }
 
       if (type === 'plan') {
-        // Validate plan file columns (flexible check for Material No / Part Code / Shortage)
         const firstRow = rows[0];
         const keys = Object.keys(firstRow);
-        const hasPart = keys.some(k => k.match(/material|part|code/i));
-        const hasShortage = keys.some(k => k.match(/shortage|qty|quantity/i));
 
-        if (!hasPart) {
+        // Find Part Code column (e.g. "Material No.", "Part Code", "Material No", "Part No")
+        const partKey = keys.find(k => k.match(/material\s*no/i) || k.match(/part\s*code/i) || k.match(/part\s*no/i) || k.match(/material/i)) || keys[0];
+        
+        // Find Shortage column (e.g. "P401\nShortage", "Shortage", "Shortage Qty", "Quantity")
+        const shortKey = keys.find(k => k.match(/shortage/i)) || keys.find(k => k.match(/qty|quantity/i));
+
+        if (!partKey) {
           ssShowError(type, "Missing part column: 'Material No.' or 'Part Code'");
           return;
         }
-        if (!hasShortage) {
+        if (!shortKey) {
           ssShowError(type, "Missing shortage column: 'Shortage' or 'P401\\nShortage'");
           return;
         }
@@ -61,10 +70,6 @@ function ssHandleFile(type, file) {
         // Parse plan file into standard request format
         const planRequests = [];
         rows.forEach((row, idx) => {
-          const keys = Object.keys(row);
-          
-          // Find Part Code
-          const partKey = keys.find(k => k.match(/material\s*no/i) || k.match(/part\s*code/i) || k.match(/part\s*no/i) || k.match(/material/i)) || keys[0];
           const rawCode = String(row[partKey] || '').trim();
           if (!rawCode) return;
 
@@ -76,9 +81,8 @@ function ssHandleFile(type, file) {
           const plantKey = keys.find(k => k.match(/plant/i));
           const plant = plantKey ? String(row[plantKey] || '').trim() : 'HVF1';
 
-          // Find Shortage Quantity
-          const shortKey = keys.find(k => k.match(/shortage/i)) || keys.find(k => k.match(/qty|quantity/i));
-          let rawQty = shortKey ? row[shortKey] : 0;
+          // Shortage Qty — take absolute value (handles negative -32 as positive shortage quantity 32)
+          let rawQty = row[shortKey];
           let qty = Math.abs(parseFloat(rawQty) || 0);
 
           if (qty <= 0) return; // Only process actual shortages
@@ -92,7 +96,7 @@ function ssHandleFile(type, file) {
             'Part Name':            partName,
             'Quantity':             qty,
             'Requested Date':       reqDate,
-            'Destination Location': '', // empty string so FIFO searches all warehouse locations
+            'Destination Location': '', // empty string so FIFO allocation searches ALL warehouse locations
             'Source Location':      plant || 'HVF1',
             'Requested Quantity':   qty,
             'Shortage Quantity':    qty,
@@ -110,7 +114,7 @@ function ssHandleFile(type, file) {
 
       } else if (type === 'inventory') {
         const colsLower = Object.keys(rows[0]).map(k => k.trim().toLowerCase());
-        const hasPartCol = colsLower.includes('part code') || colsLower.includes('part no');
+        const hasPartCol = colsLower.includes('part code') || colsLower.includes('part no') || colsLower.includes('material no.') || colsLower.includes('material no');
         const hasQty     = colsLower.includes('quantity') || colsLower.includes('qty');
         if (!hasPartCol) { ssShowError(type, `Missing column: 'Part Code' or 'Part No'`); return; }
         if (!hasQty)     { ssShowError(type, `Missing column: 'Quantity'`); return; }
@@ -120,7 +124,7 @@ function ssHandleFile(type, file) {
 
       } else if (type === 'container') {
         const colsLower = Object.keys(rows[0]).map(k => k.trim().toLowerCase());
-        const hasPartCol = colsLower.includes('part no') || colsLower.includes('part code');
+        const hasPartCol = colsLower.includes('part no') || colsLower.includes('part code') || colsLower.includes('material no.') || colsLower.includes('material no');
         const hasQty     = colsLower.includes('quantity') || colsLower.includes('qty');
         if (!hasPartCol) { ssShowError(type, `Missing column: 'Part No' or 'Part Code'`); return; }
         if (!hasQty)     { ssShowError(type, `Missing column: 'Quantity'`); return; }
@@ -213,16 +217,33 @@ function processSS() {
       // 3. Enrich shortage rows with transit & blocked stock info
       const combinedShortages = buildCombinedShortages(fifoResults.shortages, ssState.data.containers, blockedMap);
 
+      // 4. Compute Summary Metrics
+      const totalReqs       = ssState.data.planRequests.length;
+      const totalUnitsReq   = ssState.data.planRequests.reduce((s, r) => s + (parseFloat(r['Quantity']) || 0), 0);
+      const totalUnitsAlloc = fifoResults.fulfilled.reduce((s, r) => s + (parseFloat(r['Quantity Allocated From This Batch']) || 0), 0);
+      const totalUnitsShort = fifoResults.shortages.reduce((s, r) => s + (parseFloat(r['Shortage Quantity']) || 0), 0);
+      const fulfilledFull   = ssState.data.planRequests.filter(r => !fifoResults.shortages.some(s => s._reqIdx === r._reqIdx)).length;
+      const shortageCount   = totalReqs - fulfilledFull;
+
+      const summary = {
+        totalReqs,
+        fulfilledFull,
+        shortageCount,
+        totalUnitsReq,
+        totalUnitsAlloc,
+        totalUnitsShort
+      };
+
       ssState.results = {
         fulfilled: fifoResults.fulfilled,
         shortages: combinedShortages,
-        summary:   fifoResults.summary,
+        summary:   summary,
         blockedMap: blockedMap
       };
 
       if (overlay) overlay.hidden = true;
 
-      // 4. Display Results
+      // 5. Display Results
       ssRenderResults();
       document.getElementById('ss-results-section').hidden = false;
       document.getElementById('ss-results-section').scrollIntoView({ behavior: 'smooth' });
