@@ -458,26 +458,6 @@ function buildFIFOWaterfallReport(shortages, fulfilled, containerRows, blockedMa
   });
 }
 
-function buildShortagePartRequestRows(shortages, inventory, containerRows) {
-  if (!shortages || shortages.length === 0) return [];
-  return shortages.map(s => ({
-    'Part Code': s['Part Code'] || '',
-    'Part Name': s['Part Name'] || '',
-    'Quantity': s['Shortage Quantity'] || s['Quantity'] || 0,
-    'Requested Date': s['Requested Date'] || '',
-    'Destination Location': s['Destination Location'] || '',
-    'Shortage Quantity': s['Shortage Quantity'] || s['Quantity'] || 0,
-    'Requested Quantity': s['Requested Quantity'] || s['Quantity'] || 0,
-    'Total Qty Available': s['Total Quantity Available'] || 0,
-    'Total Qty Allocated': s['Total Quantity Allocated'] || 0,
-    'Net Status': s['Net Status'] || '',
-    'In Transit Qty': s['In Transit Qty'] || '',
-    'Port ETA': s['Port ETA'] || '',
-    'Blocked Qty in Storage': s['Blocked Qty in Storage'] || '',
-    'Blocked Storage Location': s['Blocked Storage Locations'] || ''
-  }));
-}
-
 function buildPortTransitReport(shortages, containerRows, blockedMap) {
   if (!shortages || shortages.length === 0) return [];
   const results = [];
@@ -573,22 +553,45 @@ function ssDownloadExcel() {
       }
     };
 
-    const createWorkbook = (fRows, sRows, summaryData, partMasterData, suffix) => {
+    const createWorkbook = (fRows, sRows, summaryData, partMasterData, waterfallData, portData, suffix) => {
       const wb = XLSX.utils.book_new();
 
+      // Sheet 1: Fulfilled
       const ws1 = buildStyledSheet(fRows.length ? fRows : [{ Note: 'No fulfilled allocations.' }], fulfillPri);
       XLSX.utils.book_append_sheet(wb, ws1, 'Fulfilled');
 
+      // Sheet 2: Shortages
       const ws2 = buildStyledSheet(sRows.length ? sRows : [{ Note: 'No shortages.' }], shortagePri);
       XLSX.utils.book_append_sheet(wb, ws2, 'Shortages');
 
+      // Sheet 3: Summary
       const ws4 = buildStyledSheet(summaryData, []);
       XLSX.utils.book_append_sheet(wb, ws4, 'Summary');
 
+      // Sheet 4: Shortage Parts Master
       if (partMasterData && partMasterData.length > 0) {
         const pmPri = ['Part Code', 'Part Name', 'Total Shortage Qty', 'Net Status', 'Total In Transit Qty', 'Containers', 'Transit Statuses'];
         const wsPM = buildStyledSheet(partMasterData, pmPri);
         XLSX.utils.book_append_sheet(wb, wsPM, 'Shortage Parts Master');
+      }
+
+      // Optional Sheet 5: Shortage Waterfall (in FULL report)
+      if (waterfallData && waterfallData.length > 0) {
+        const waterfallPri = [
+          'Part Code', 'Part Name', 'Destination Location', 'Requested Date', 'Required Qty (Shortage)',
+          '① Allocated from Warehouse', '① Warehouse Locations', '① Remaining After Warehouse',
+          '② In Transit / Port Qty', '② Container Nos', '② Port ETA', '② Transit Status', '② Remaining After Transit',
+          '③ Blocked Qty in Storage', '③ Blocked Locations', '❌ Absolute Shortage', 'Status'
+        ];
+        const wsW = buildStyledSheet(waterfallData, waterfallPri);
+        XLSX.utils.book_append_sheet(wb, wsW, 'Shortage Waterfall');
+      }
+
+      // Optional Sheet 6: Port & Transit (in FULL report)
+      if (portData && portData.length > 0) {
+        const portPriCols = ['Part Code','Part Name','Quantity','Requested Date','Destination Location','Container No.','In Transit Qty','Container Status','Port ETA','Blocked Qty','Blocked Storage Locations','Availability Status'];
+        const wsP = buildStyledSheet(portData, portPriCols);
+        XLSX.utils.book_append_sheet(wb, wsP, 'Port & Transit Detail');
       }
 
       const safeSuffix = String(suffix).replace(/[^a-z0-9_-]/gi, '_').toUpperCase();
@@ -653,82 +656,23 @@ function ssDownloadExcel() {
       };
     });
 
-    // 0.5 Download standalone PARTS MASTER file
+    // Generate Waterfall and Port Data for FULL report
+    const waterfallRows = buildFIFOWaterfallReport(
+      ssState.results.shortages, ssState.results.fulfilled,
+      ssState.data.containers, ssState.results.blockedMap
+    );
+    const portRows = buildPortTransitReport(ssState.results.shortages, ssState.data.containers, ssState.results.blockedMap);
+
+    // FILE 1: Standalone Shortage Parts Master
     setTimeout(() => {
       const wbParts = XLSX.utils.book_new();
       const pmPri = ['Part Code', 'Part Name', 'Total Shortage Qty', 'Net Status', 'Total In Transit Qty', 'Containers', 'Transit Statuses'];
       const wsParts = buildStyledSheet(partMasterList.length ? partMasterList : [{ Note: 'No shortages.' }], pmPri);
       XLSX.utils.book_append_sheet(wbParts, wsParts, 'Shortage Parts Master');
-      const pmFilename = `SHORTAGE_STATEMENT_PARTS_MASTER_${stamp}.xlsx`;
-      addManualDownloadBtn(wbParts, pmFilename);
+      addManualDownloadBtn(wbParts, `SHORTAGE_STATEMENT_PARTS_MASTER_${stamp}.xlsx`);
     }, 100);
 
-    // 1. Identify all unique Pick Locations / Allocation Sources
-    const sourceLocs = new Set();
-    (ssState.results.fulfilled || []).forEach(r => {
-      const sLoc = String(r['Pick Location'] || r['Allocation Source'] || '').trim();
-      if (sLoc) sourceLocs.add(sLoc);
-    });
-
-    // 2. FILE 1: SHORTAGE WATERFALL REPORT
-    const waterfallRows = buildFIFOWaterfallReport(
-      ssState.results.shortages, ssState.results.fulfilled,
-      ssState.data.containers, ssState.results.blockedMap
-    );
-    const waterfallPri = [
-      'Part Code', 'Part Name', 'Destination Location', 'Requested Date',
-      'Required Qty (Shortage)',
-      '① Allocated from Warehouse', '① Warehouse Locations', '① Remaining After Warehouse',
-      '② In Transit / Port Qty', '② Container Nos', '② Port ETA', '② Transit Status', '② Remaining After Transit',
-      '③ Blocked Qty in Storage', '③ Blocked Locations',
-      '❌ Absolute Shortage', 'Status'
-    ];
-    const wbWater = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wbWater,
-      buildStyledSheet(waterfallRows.length ? waterfallRows : [{Note:'No shortages.'}], waterfallPri),
-      'Shortage Waterfall');
-    
-    const shortReqRows = buildShortagePartRequestRows(
-      ssState.results.shortages, ssState.data.inventory, ssState.data.containers
-    );
-    const partReqPri6 = [
-      'Part Code', 'Part Name', 'Quantity', 'Requested Date',
-      'Destination Location',
-      'Quantity Allocated From This Batch', 'Status',
-      'Container No.', 'Pick Location', 'Batch Order Date',
-      'Order No / Invoice No', 'Case No', 'Type', 'Plant',
-      'Shortage Quantity', 'Requested Quantity',
-      'Total Qty Available', 'Total Qty Allocated',
-      'Net Status', 'In Transit Qty', 'Port ETA',
-      'Blocked Qty in Storage', 'Blocked Storage Location'
-    ];
-    XLSX.utils.book_append_sheet(wbWater,
-      buildStyledSheet(shortReqRows.length ? shortReqRows : [{Note:'No shortages.'}], partReqPri6),
-      'Shortage Part Request');
-    addManualDownloadBtn(wbWater, `SHORTAGE_STATEMENT_Waterfall_${stamp}.xlsx`);
-
-    // 3. FILE 2: Port / In-Transit / Blocked
-    const portPriCols = ['Part Code','Part Name','Quantity','Requested Date',
-      'Destination Location',
-      'Container No.','In Transit Qty','Container Status','Port ETA',
-      'Blocked Qty','Blocked Storage Locations','Availability Status'];
-    const portReqPriCols = ['Part Code','Part Name','Quantity','Requested Date',
-      'Destination Location'];
-    const portRows = buildPortTransitReport(ssState.results.shortages, ssState.data.containers, ssState.results.blockedMap);
-    const portReqRows = portRows.map(r => ({
-      'Part Code': r['Part Code'], 'Part Name': r['Part Name'], 'Quantity': r['Quantity'],
-      'Requested Date': r['Requested Date'], 'Destination Location': r['Destination Location']
-    }));
-    const wbPort = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wbPort,
-      buildStyledSheet(portReqRows.length ? portReqRows : [{Note:'No parts at Port/Transit/Blocked.'}], portReqPriCols),
-      'Port & Transit (Req Format)');
-    XLSX.utils.book_append_sheet(wbPort,
-      buildStyledSheet(portRows.length ? portRows : [{Note:'No parts at Port/Transit/Blocked.'}], portPriCols),
-      'Port Transit Blocked Detail');
-    addManualDownloadBtn(wbPort, `SHORTAGE_STATEMENT_Port_Transit_Blocked_${stamp}.xlsx`);
-
-    // 4. FULL Report Workbook
+    // FILE 2: Master FULL Report
     const fullSummaryRows = [
       {
         'Report Name': 'SHORTAGE STATEMENT FULL REPORT',
@@ -738,11 +682,21 @@ function ssDownloadExcel() {
         'Generated At': new Date().toLocaleString()
       }
     ];
+    setTimeout(() => {
+      createWorkbook(
+        ssState.results.fulfilled, ssState.results.shortages,
+        fullSummaryRows, partMasterList, waterfallRows, portRows, 'FULL'
+      );
+    }, 400);
 
-    createWorkbook(ssState.results.fulfilled, ssState.results.shortages, fullSummaryRows, partMasterList, 'FULL');
+    // FILE 3...N: Per-Location Pick Lists (Identical file count pattern to Section A)
+    const sourceLocs = new Set();
+    (ssState.results.fulfilled || []).forEach(r => {
+      const sLoc = String(r['Pick Location'] || r['Allocation Source'] || '').trim();
+      if (sLoc) sourceLocs.add(sLoc);
+    });
 
-    // 5. Separate Location Pick Lists (staggered downloads like Section A)
-    let delay = 600;
+    let delay = 700;
     sourceLocs.forEach(sLoc => {
       setTimeout(() => {
         const fRows = (ssState.results.fulfilled || []).filter(r => String(r['Pick Location'] || r['Allocation Source'] || '').trim() === sLoc);
@@ -755,12 +709,12 @@ function ssDownloadExcel() {
           'Generated At': new Date().toLocaleString()
         }];
 
-        createWorkbook(fRows, sRows, locSummaryRow, null, sLoc);
+        createWorkbook(fRows, sRows, locSummaryRow, null, null, null, sLoc);
       }, delay);
       delay += 400;
     });
 
-    showToast(`Downloads started! All reports formatted matching Section A.`, 'success', 6000);
+    showToast(`Downloading Shortage Statement reports (matching Section A file counts)...`, 'success', 6000);
   } catch (err) {
     showToast(`Export error: ${err.message}`, 'error');
     console.error(err);
