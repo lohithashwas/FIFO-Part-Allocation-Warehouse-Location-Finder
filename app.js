@@ -835,22 +835,30 @@ const S_CELL_PRIORITY_EVEN = { fill: { patternType: 'solid', fgColor: { rgb: 'BF
 const S_CELL_ODD           = { fill: { patternType: 'solid', fgColor: { rgb: 'FFFFFF' } }, alignment: ALIGN_CENTER, border: BORDER_STD };
 const S_CELL_EVEN          = { fill: { patternType: 'solid', fgColor: { rgb: 'F4F6FA' } }, alignment: ALIGN_CENTER, border: BORDER_STD };
 
+// Columns to exclude from every Excel export
+const EXCEL_EXCLUDE_COLS = new Set(['Source Location']);
+
 function buildStyledSheet(rows, priorityCols) {
   if (!rows || rows.length === 0) {
     return XLSX.utils.json_to_sheet([{ Note: 'No data.' }]);
   }
 
-  // Filter out internal _ marker keys
+  // Filter out internal _ marker keys AND globally excluded columns
   const cleanRows = rows.map(r => {
     const o = {};
-    for (const k of Object.keys(r)) { if (!k.startsWith('_')) o[k] = r[k]; }
+    for (const k of Object.keys(r)) {
+      if (!k.startsWith('_') && !EXCEL_EXCLUDE_COLS.has(k)) o[k] = r[k];
+    }
     return o;
   });
+
+  // Strip excluded cols from priorityCols too
+  priorityCols = priorityCols.filter(c => !EXCEL_EXCLUDE_COLS.has(c));
 
   // Build ordered column list: priority first, then remaining
   const seen = new Set(priorityCols);
   const allCols = [...priorityCols];
-  for (const key of Object.keys(cleanRows[0])) {
+  for (const key of Object.keys(cleanRows[0] || {})) {
     if (!seen.has(key)) { allCols.push(key); seen.add(key); }
   }
   const prioritySet = new Set(priorityCols);
