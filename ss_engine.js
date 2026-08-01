@@ -689,27 +689,41 @@ function ssDownloadExcel() {
       );
     }, 400);
 
-    // FILE 3...N: Per-Location Pick Lists (Identical file count pattern to Section A)
-    const sourceLocs = new Set();
+    // Helper to group sub-locations into major warehouses (KD1, KD2, KD3, Container Yard, etc.)
+    const getMajorWarehouseLocation = (locStr) => {
+      if (!locStr) return 'INVENTORY';
+      const str = String(locStr).trim().toUpperCase();
+      if (str.includes('KD1')) return 'KD1';
+      if (str.includes('KD2')) return 'KD2';
+      if (str.includes('KD3')) return 'KD3';
+      if (str.includes('CONTAINER')) return 'CONTAINER_YARD';
+      if (str.includes('INVENTORY')) return 'INVENTORY';
+      const clean = str.split(/[\s\-_,\.]/)[0];
+      return clean || 'INVENTORY';
+    };
+
+    // FILE 3...N: Major Location Pick Lists (e.g. KD1, KD2, Container Yard)
+    const locationGroupMap = new Map();
     (ssState.results.fulfilled || []).forEach(r => {
-      const sLoc = String(r['Pick Location'] || r['Allocation Source'] || '').trim();
-      if (sLoc) sourceLocs.add(sLoc);
+      const rawLoc = r['Pick Location'] || r['_sourceLoc'] || r['Allocation Source'] || 'INVENTORY';
+      const mainLoc = getMajorWarehouseLocation(rawLoc);
+      if (!locationGroupMap.has(mainLoc)) locationGroupMap.set(mainLoc, []);
+      locationGroupMap.get(mainLoc).push(r);
     });
 
     let delay = 700;
-    sourceLocs.forEach(sLoc => {
+    locationGroupMap.forEach((fRows, mainLoc) => {
       setTimeout(() => {
-        const fRows = (ssState.results.fulfilled || []).filter(r => String(r['Pick Location'] || r['Allocation Source'] || '').trim() === sLoc);
         const sRows = (ssState.results.shortages || []);
         
         const locSummaryRow = [{
-          'Report Type': `${sLoc} Shortage Pick List`,
+          'Report Type': `${mainLoc} Shortage Pick List`,
           'Total Rows to Pick': fRows.length,
           'Total Units to Pick': fRows.reduce((sum, r) => sum + (parseFloat(r['Quantity Allocated From This Batch']) || 0), 0),
           'Generated At': new Date().toLocaleString()
         }];
 
-        createWorkbook(fRows, sRows, locSummaryRow, null, null, null, sLoc);
+        createWorkbook(fRows, sRows, locSummaryRow, null, null, null, mainLoc);
       }, delay);
       delay += 400;
     });

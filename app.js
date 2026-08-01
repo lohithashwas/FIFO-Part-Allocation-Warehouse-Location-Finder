@@ -1177,29 +1177,41 @@ function downloadExcel() {
     }, 400);
 
     // 5. Generate and download a separate file for each unique SOURCE WAREHOUSE
-    // We use _sourceLoc (e.g. KD1, KD2, Container Yard) to generate true pick lists
-    const sourceLocs = new Set();
+    // Helper to group sub-locations into major warehouses (KD1, KD2, KD3, Container Yard, etc.)
+    const getMajorWarehouseLocation = (locStr) => {
+      if (!locStr) return 'INVENTORY';
+      const str = String(locStr).trim().toUpperCase();
+      if (str.includes('KD1')) return 'KD1';
+      if (str.includes('KD2')) return 'KD2';
+      if (str.includes('KD3')) return 'KD3';
+      if (str.includes('CONTAINER')) return 'CONTAINER_YARD';
+      if (str.includes('INVENTORY')) return 'INVENTORY';
+      const clean = str.split(/[\s\-_,\.]/)[0];
+      return clean || 'INVENTORY';
+    };
+
+    // 5. Group and download pick lists for each major warehouse location
+    const locationGroupMap = new Map();
     state.results.fulfilled.forEach(r => {
-      const sLoc = String(r._sourceLoc || r['Allocation Source'] || '').trim();
-      if (sLoc) sourceLocs.add(sLoc);
+      const rawLoc = r._sourceLoc || r['Pick Location'] || r['Allocation Source'] || 'INVENTORY';
+      const mainLoc = getMajorWarehouseLocation(rawLoc);
+      if (!locationGroupMap.has(mainLoc)) locationGroupMap.set(mainLoc, []);
+      locationGroupMap.get(mainLoc).push(r);
     });
 
     let delay = 700;
-    sourceLocs.forEach(sLoc => {
+    locationGroupMap.forEach((fRows, mainLoc) => {
       setTimeout(() => {
-        const fRows = state.results.fulfilled.filter(r => String(r._sourceLoc || r['Allocation Source'] || '').trim() === sLoc);
-        
-        // Include shortages that were requested specifically from this source location
-        const sRows = state.results.shortages.filter(r => String(r['Source Location'] || '').trim() === sLoc);
+        const sRows = state.results.shortages.filter(r => getMajorWarehouseLocation(r['Source Location'] || r['Destination Location']) === mainLoc);
         
         const locSummaryRow = [{
-          'Report Type': `${sLoc} Pick List`,
+          'Report Type': `${mainLoc} Pick List`,
           'Total Rows to Pick': fRows.length,
           'Total Units to Pick': fRows.reduce((sum, r) => sum + (parseFloat(r['Quantity Allocated From This Batch']) || 0), 0),
           'Generated At': new Date().toLocaleString()
         }];
 
-        createWorkbook(fRows, sRows, locSummaryRow, null, sLoc);
+        createWorkbook(fRows, sRows, locSummaryRow, null, mainLoc);
       }, delay);
       delay += 400; // Stagger downloads slightly to prevent browser blocking
     });
