@@ -534,21 +534,18 @@ function ssDownloadExcel() {
     const now = new Date();
     const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
 
+    // Exact matching column fields as FIFO Allocation (Section A) - NO "Source Location" column!
     const fulfillPri = [
       'Part Code', 'Part Name', 'Quantity', 'Requested Date',
-      'Destination Location',
-      'Quantity Allocated From This Batch', 'Status',
-      'Container No.', 'Pick Location', 'Batch Order Date',
-      'Order No / Invoice No', 'Case No', 'Type', 'Plant'
+      'Destination Location', 'Allocation Source', 'Pick Location', 'Batch Order Date',
+      'Quantity Allocated From This Batch', 'Running Total Fulfilled', 'Status',
+      'Case No', 'Order No / Invoice No', 'Type', 'Plant'
     ];
 
     const shortagePri = [
-      'Part Code', 'Part Name', 'Quantity', 'Requested Date',
-      'Destination Location',
-      'Shortage Quantity', 'Requested Quantity', 'Total Quantity Available', 'Total Quantity Allocated',
-      'Status', 'Net Status',
+      'Part Code', 'Part Name', 'Requested Quantity', 'Shortage Quantity', 'Net Status',
       'Container No.', 'In Transit Qty', 'Container Status', 'Port ETA',
-      'Blocked Qty in Storage', 'Blocked Storage Locations'
+      'Blocked Qty in Storage', 'Blocked Storage Locations', 'Destination Location'
     ];
 
     const btnContainer = document.getElementById('ss-download-buttons');
@@ -591,7 +588,7 @@ function ssDownloadExcel() {
       addManualDownloadBtn(wb, filename);
     };
 
-    // Part Master List for Shortages
+    // 0. Build the Complete Part Master List for Shortages
     const partMasterMap = new Map();
     (ssState.results.shortages || []).forEach(r => {
       const code = String(r['Part Code'] || '').trim();
@@ -648,7 +645,24 @@ function ssDownloadExcel() {
       };
     });
 
-    // FILE 1: SHORTAGE WATERFALL REPORT
+    // 0.5 Download standalone PARTS MASTER file
+    setTimeout(() => {
+      const wbParts = XLSX.utils.book_new();
+      const pmPri = ['Part Code', 'Part Name', 'Total Shortage Qty', 'Net Status', 'Total In Transit Qty', 'Containers', 'Transit Statuses'];
+      const wsParts = buildStyledSheet(partMasterList.length ? partMasterList : [{ Note: 'No shortages.' }], pmPri);
+      XLSX.utils.book_append_sheet(wbParts, wsParts, 'Shortage Parts Master');
+      const pmFilename = `SHORTAGE_STATEMENT_PARTS_MASTER_${stamp}.xlsx`;
+      addManualDownloadBtn(wbParts, pmFilename);
+    }, 100);
+
+    // 1. Identify all unique Pick Locations / Allocation Sources
+    const sourceLocs = new Set();
+    (ssState.results.fulfilled || []).forEach(r => {
+      const sLoc = String(r['Pick Location'] || r['Allocation Source'] || '').trim();
+      if (sLoc) sourceLocs.add(sLoc);
+    });
+
+    // 2. FILE 1: SHORTAGE WATERFALL REPORT
     const waterfallRows = buildFIFOWaterfallReport(
       ssState.results.shortages, ssState.results.fulfilled,
       ssState.data.containers, ssState.results.blockedMap
@@ -685,7 +699,7 @@ function ssDownloadExcel() {
       'Shortage Part Request');
     addManualDownloadBtn(wbWater, `SHORTAGE_STATEMENT_Waterfall_${stamp}.xlsx`);
 
-    // FILE 2: Port / In-Transit / Blocked
+    // 3. FILE 2: Port / In-Transit / Blocked
     const portPriCols = ['Part Code','Part Name','Quantity','Requested Date',
       'Destination Location',
       'Container No.','In Transit Qty','Container Status','Port ETA',
@@ -706,7 +720,7 @@ function ssDownloadExcel() {
       'Port Transit Blocked Detail');
     addManualDownloadBtn(wbPort, `SHORTAGE_STATEMENT_Port_Transit_Blocked_${stamp}.xlsx`);
 
-    // FULL Report Workbook
+    // 4. FULL Report Workbook
     const fullSummaryRows = [
       {
         'Report Name': 'SHORTAGE STATEMENT FULL REPORT',
@@ -719,7 +733,26 @@ function ssDownloadExcel() {
 
     createWorkbook(ssState.results.fulfilled, ssState.results.shortages, fullSummaryRows, partMasterList, 'FULL');
 
-    showToast(`Downloads started! Click manual buttons below if browser blocked any files.`, 'success', 6000);
+    // 5. Separate Location Pick Lists (staggered downloads like Section A)
+    let delay = 600;
+    sourceLocs.forEach(sLoc => {
+      setTimeout(() => {
+        const fRows = (ssState.results.fulfilled || []).filter(r => String(r['Pick Location'] || r['Allocation Source'] || '').trim() === sLoc);
+        const sRows = (ssState.results.shortages || []);
+        
+        const locSummaryRow = [{
+          'Report Type': `${sLoc} Shortage Pick List`,
+          'Total Rows to Pick': fRows.length,
+          'Total Units to Pick': fRows.reduce((sum, r) => sum + (parseFloat(r['Quantity Allocated From This Batch']) || 0), 0),
+          'Generated At': new Date().toLocaleString()
+        }];
+
+        createWorkbook(fRows, sRows, locSummaryRow, null, sLoc);
+      }, delay);
+      delay += 400;
+    });
+
+    showToast(`Downloads started! All reports formatted matching Section A.`, 'success', 6000);
   } catch (err) {
     showToast(`Export error: ${err.message}`, 'error');
     console.error(err);
