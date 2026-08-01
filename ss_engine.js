@@ -551,11 +551,6 @@ function ssDownloadExcel() {
     ];
 
     const shortagePri = [
-      'Part Code', 'Part Name', 'Requested Quantity', 'Shortage Quantity', 'Net Status',
-      'Container No.', 'In Transit Qty', 'Container Status', 'Port ETA',
-      'Blocked Qty in Storage', 'Blocked Storage Locations', 'Destination Location'
-    ];
-
     const btnContainer = document.getElementById('ss-download-buttons');
     if (btnContainer) btnContainer.innerHTML = '';
     const mgr = document.getElementById('ss-download-manager');
@@ -573,144 +568,13 @@ function ssDownloadExcel() {
       }
     };
 
-    const createWorkbook = (fRows, sRows, summaryData, partMasterData, waterfallData, portData, suffix) => {
+    const createSingleSheetWB = (data, headers, sheetName, filename) => {
       const wb = XLSX.utils.book_new();
-
-      // Sheet 1: Fulfilled
-      const ws1 = buildStyledSheet(fRows.length ? fRows : [{ Note: 'No fulfilled allocations.' }], fulfillPri);
-      XLSX.utils.book_append_sheet(wb, ws1, 'Fulfilled');
-
-      // Sheet 2: Shortages
-      const ws2 = buildStyledSheet(sRows.length ? sRows : [{ Note: 'No shortages.' }], shortagePri);
-      XLSX.utils.book_append_sheet(wb, ws2, 'Shortages');
-
-      // Sheet 3: Summary
-      const ws4 = buildStyledSheet(summaryData, []);
-      XLSX.utils.book_append_sheet(wb, ws4, 'Summary');
-
-      // Sheet 4: Shortage Parts Master
-      if (partMasterData && partMasterData.length > 0) {
-        const pmPri = ['Part Code', 'Part Name', 'Total Shortage Qty', 'Net Status', 'Total In Transit Qty', 'Containers', 'Transit Statuses'];
-        const wsPM = buildStyledSheet(partMasterData, pmPri);
-        XLSX.utils.book_append_sheet(wb, wsPM, 'Shortage Parts Master');
-      }
-
-      // Optional Sheet 5: Shortage Waterfall (in FULL report)
-      if (waterfallData && waterfallData.length > 0) {
-        const waterfallPri = [
-          'Part Code', 'Part Name', 'Destination Location', 'Requested Date', 'Required Qty (Shortage)',
-          '① Allocated from Warehouse', '① Warehouse Locations', '① Remaining After Warehouse',
-          '② In Transit / Port Qty', '② Container Nos', '② Port ETA', '② Transit Status', '② Remaining After Transit',
-          '③ Blocked Qty in Storage', '③ Blocked Locations', '❌ Absolute Shortage', 'Status'
-        ];
-        const wsW = buildStyledSheet(waterfallData, waterfallPri);
-        XLSX.utils.book_append_sheet(wb, wsW, 'Shortage Waterfall');
-      }
-
-      // Optional Sheet 6: Port & Transit (in FULL report)
-      if (portData && portData.length > 0) {
-        const portPriCols = ['Part Code','Part Name','Quantity','Requested Date','Destination Location','Container No.','In Transit Qty','Container Status','Port ETA','Blocked Qty','Blocked Storage Locations','Availability Status'];
-        const wsP = buildStyledSheet(portData, portPriCols);
-        XLSX.utils.book_append_sheet(wb, wsP, 'Port & Transit Detail');
-      }
-
-      const safeSuffix = String(suffix).replace(/[^a-z0-9_-]/gi, '_').toUpperCase();
-      const filename = `SHORTAGE_STATEMENT_${safeSuffix}_${stamp}.xlsx`;
+      const ws = buildStyledSheet(data.length ? data : [{ Note: 'No data.' }], headers);
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
       addManualDownloadBtn(wb, filename);
     };
 
-    // 0. Build the Complete Part Master List for Shortages
-    const partMasterMap = new Map();
-    (ssState.results.shortages || []).forEach(r => {
-      const code = String(r['Part Code'] || '').trim();
-      if (!code) return;
-      if (!partMasterMap.has(code)) {
-        partMasterMap.set(code, {
-          'Part Code': code,
-          'Part Name': r['Part Name'],
-          _shortKeys: new Set(),
-          _transitKeys: new Set(),
-          'Total Shortage Qty': 0,
-          'Total In Transit Qty': 0,
-          'Containers': new Set(),
-          'Statuses': new Set()
-        });
-      }
-      
-      const p = partMasterMap.get(code);
-      const shortKey = code + '|' + r['Requested Date'] + '|' + r['Shortage Quantity'] + '|' + r['Destination Location'];
-      if (!p._shortKeys.has(shortKey)) {
-        p._shortKeys.add(shortKey);
-        p['Total Shortage Qty'] += (parseFloat(r['Shortage Quantity']) || 0);
-      }
-      
-      const cont = String(r['Container No.'] || '').trim();
-      const transitQty = parseFloat(r['In Transit Qty']) || 0;
-      if (cont && transitQty > 0) {
-        const transKey = cont + '|' + transitQty;
-        if (!p._transitKeys.has(transKey)) {
-          p._transitKeys.add(transKey);
-          p['Total In Transit Qty'] += transitQty;
-          p['Containers'].add(cont);
-          const stat = String(r['Container Status'] || '').trim();
-          if (stat) p['Statuses'].add(stat);
-        }
-      }
-    });
-
-    const partMasterList = Array.from(partMasterMap.values()).map(p => {
-      const netShort = Math.max(0, p['Total Shortage Qty'] - p['Total In Transit Qty']);
-      let netStatus = '';
-      if (p['Total In Transit Qty'] === 0) netStatus = `Absolute Shortage`;
-      else if (netShort === 0) netStatus = `Fully Covered`;
-      else netStatus = `Partial Shortage (${netShort} missing)`;
-
-      return {
-        'Part Code': p['Part Code'],
-        'Part Name': p['Part Name'],
-        'Total Shortage Qty': p['Total Shortage Qty'],
-        'Net Status': netStatus,
-        'Total In Transit Qty': p['Total In Transit Qty'],
-        'Containers': Array.from(p['Containers']).join(', '),
-        'Transit Statuses': Array.from(p['Statuses']).join(', ')
-      };
-    });
-
-    // Generate Waterfall and Port Data for FULL report
-    const waterfallRows = buildFIFOWaterfallReport(
-      ssState.results.shortages, ssState.results.fulfilled,
-      ssState.data.containers, ssState.results.blockedMap
-    );
-    const portRows = buildPortTransitReport(ssState.results.shortages, ssState.data.containers, ssState.results.blockedMap);
-
-    // FILE 1: Standalone Shortage Parts Master
-    setTimeout(() => {
-      const wbParts = XLSX.utils.book_new();
-      const pmPri = ['Part Code', 'Part Name', 'Total Shortage Qty', 'Net Status', 'Total In Transit Qty', 'Containers', 'Transit Statuses'];
-      const wsParts = buildStyledSheet(partMasterList.length ? partMasterList : [{ Note: 'No shortages.' }], pmPri);
-      XLSX.utils.book_append_sheet(wbParts, wsParts, 'Shortage Parts Master');
-      addManualDownloadBtn(wbParts, `SHORTAGE_STATEMENT_PARTS_MASTER_${stamp}.xlsx`);
-    }, 100);
-
-    // FILE 2: Master FULL Report
-    const fullSummaryRows = [
-      {
-        'Report Name': 'SHORTAGE STATEMENT FULL REPORT',
-        'Requests Processed': ssState.results.summary.totalReqs,
-        'Fully Fulfilled': ssState.results.summary.fulfilledFull,
-        'Shortage Count': ssState.results.summary.shortageCount,
-        'Generated At': new Date().toLocaleString()
-      }
-    ];
-    setTimeout(() => {
-      createWorkbook(
-        ssState.results.fulfilled, ssState.results.shortages,
-        fullSummaryRows, partMasterList, waterfallRows, portRows, 'FULL'
-      );
-    }, 400);
-
-    // Helper to group sub-locations into major warehouses (KD1, KD2, KD3, Container Yard)
-    // Returns NULL for individual shelf bin codes (3B13, IM51, C05) so it doesn't create dozens of files
     const getMajorWarehouseLocation = (locStr) => {
       if (!locStr) return null;
       const str = String(locStr).trim().toUpperCase();
@@ -721,7 +585,6 @@ function ssDownloadExcel() {
       return null;
     };
 
-    // FILE 3...N: Major Location Pick Lists ONLY if explicitly KD1, KD2, KD3, or Container Yard
     const locationGroupMap = new Map();
     (ssState.results.fulfilled || []).forEach(r => {
       const rawLoc = r['Allocation Source'] || r['_sourceLoc'] || r['Pick Location'] || '';
@@ -732,24 +595,60 @@ function ssDownloadExcel() {
       }
     });
 
-    let delay = 700;
-    locationGroupMap.forEach((fRows, mainLoc) => {
-      setTimeout(() => {
-        const sRows = (ssState.results.shortages || []);
-        
-        const locSummaryRow = [{
-          'Report Type': `${mainLoc} Shortage Pick List`,
-          'Total Rows to Pick': fRows.length,
-          'Total Units to Pick': fRows.reduce((sum, r) => sum + (parseFloat(r['Quantity Allocated From This Batch']) || 0), 0),
-          'Generated At': new Date().toLocaleString()
-        }];
+    const waterfallRows = buildFIFOWaterfallReport(
+      ssState.results.shortages, ssState.results.fulfilled,
+      ssState.data.containers, ssState.results.blockedMap
+    );
 
-        createWorkbook(fRows, sRows, locSummaryRow, null, null, null, mainLoc);
+    const waterfallPri = [
+      'Part Code', 'Part Name', 'Destination Location', 'Requested Date', 'Required Demand Qty',
+      'KD1 Allocated Qty', 'KD2 Allocated Qty', 'KD3 Allocated Qty', 'Container Yard Allocated Qty',
+      'Total Warehouse Allocated Qty', 'In Transit Qty', 'Port Qty', 'Container Nos', 'Port ETA',
+      'Transit Status', 'Blocked Qty in Storage', 'Blocked Locations', 'Absolute Shortage Qty', 'Status'
+    ];
+
+    let delay = 100;
+
+    // 1. Summary
+    setTimeout(() => {
+      const fullSummaryRows = [{
+        'Report Name': 'SHORTAGE STATEMENT SUMMARY',
+        'Requests Processed': ssState.results.summary.totalReqs,
+        'Fully Fulfilled': ssState.results.summary.fulfilledFull,
+        'Shortage Count': ssState.results.summary.shortageCount,
+        'Generated At': new Date().toLocaleString()
+      }];
+      createSingleSheetWB(fullSummaryRows, [], 'Summary', `SHORTAGE_STATEMENT_SUMMARY_${stamp}.xlsx`);
+    }, delay); delay += 400;
+
+    // 2-5. KD1, KD2, KD3, Container Yard Pick Lists
+    ['KD1', 'KD2', 'KD3', 'CONTAINER_YARD'].forEach(loc => {
+      setTimeout(() => {
+        const fRows = locationGroupMap.get(loc) || [];
+        createSingleSheetWB(fRows, fulfillPri, loc, `SHORTAGE_STATEMENT_${loc}_${stamp}.xlsx`);
       }, delay);
       delay += 400;
     });
 
-    showToast(`Downloading Shortage Statement reports (matching Section A file counts)...`, 'success', 6000);
+    // 6. Blocked Stock
+    setTimeout(() => {
+      const blockedRows = waterfallRows.filter(r => r['Blocked Qty in Storage'] > 0);
+      createSingleSheetWB(blockedRows, waterfallPri, 'Blocked', `SHORTAGE_STATEMENT_BLOCKED_${stamp}.xlsx`);
+    }, delay); delay += 400;
+
+    // 7. Port & In Transit
+    setTimeout(() => {
+      const transitRows = waterfallRows.filter(r => r['In Transit Qty'] > 0 || r['Port Qty'] > 0);
+      createSingleSheetWB(transitRows, waterfallPri, 'Port_In_Transit', `SHORTAGE_STATEMENT_PORT_IN_TRANSIT_${stamp}.xlsx`);
+    }, delay); delay += 400;
+
+    // 8. Absolute Shortage
+    setTimeout(() => {
+      const absoluteRows = waterfallRows.filter(r => r['Absolute Shortage Qty'] > 0);
+      createSingleSheetWB(absoluteRows, waterfallPri, 'Absolute_Shortage', `SHORTAGE_STATEMENT_ABSOLUTE_SHORTAGE_${stamp}.xlsx`);
+    }, delay); delay += 400;
+
+    showToast(`Generating exactly the 8 requested Excel files...`, 'success', 6000);
   } catch (err) {
     showToast(`Export error: ${err.message}`, 'error');
     console.error(err);
