@@ -331,6 +331,14 @@ function ssRenderTable(type, rows) {
       const transitQty = row['In Transit Qty'] || '';
       const blockedQty = row['Blocked Qty in Storage'];
       const blockedLocs = row['Blocked Storage Locations'];
+      const netStatus = String(row['Net Status'] || '');
+
+      let netBadge = `<span class="badge badge-orange">${esc(netStatus)}</span>`;
+      if (netStatus.includes('Absolute Shortage')) {
+        netBadge = `<span class="badge badge-red">🚨 ${esc(netStatus)}</span>`;
+      } else if (netStatus.includes('Fully Covered')) {
+        netBadge = `<span class="badge badge-blue">🚢 ${esc(netStatus)}</span>`;
+      }
       
       tr.innerHTML = `
         <td><strong>${esc(row['Part Code'])}</strong></td>
@@ -338,7 +346,7 @@ function ssRenderTable(type, rows) {
         <td>${fmt(row['Requested Quantity'])}</td>
         <td>${fmt(row['Total Quantity Allocated'])}</td>
         <td style="font-weight:700;color:var(--red)">${fmt(row['Shortage Quantity'])}</td>
-        <td style="font-size:0.75rem;font-weight:600;color:var(--navy)">${esc(row['Net Status'])}</td>
+        <td>${netBadge}</td>
         <td>${esc(row['Container No.'])}</td>
         <td style="font-weight:700;color:#2563EB">${fmt(transitQty)}</td>
         <td>${esc(row['Container Status'])}</td>
