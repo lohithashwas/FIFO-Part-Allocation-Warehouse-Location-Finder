@@ -367,6 +367,167 @@ function ssSwitchTab(tab) {
   });
 }
 
+// ─── REPORT BUILDER HELPERS ───────────────────────────────────
+
+function buildFIFOWaterfallReport(shortages, fulfilled, containerRows, blockedMap) {
+  if (!shortages || shortages.length === 0) return [];
+
+  const allocMap = new Map();
+  (fulfilled || []).forEach(f => {
+    const code = ssNormCode(f['Part Code']);
+    if (!code) return;
+    if (!allocMap.has(code)) allocMap.set(code, { total: 0, locs: new Set() });
+    const entry = allocMap.get(code);
+    entry.total += (parseFloat(f['Quantity Allocated From This Batch']) || 0);
+    const loc = String(f['Pick Location'] || f['Destination Location'] || '').trim();
+    if (loc) entry.locs.add(loc);
+  });
+
+  const ctMap = new Map();
+  (containerRows || []).forEach(r => {
+    const rawCode = String(r['Part No'] || r['Part Code'] || r['Material No.'] || r['Material No'] || '').trim();
+    if (!rawCode) return;
+    const code = ssNormCode(rawCode);
+    const status = String(r['Status'] || '').trim().toUpperCase();
+    if (!status.includes('TRANSIT') && !status.includes('PORT')) return;
+    if (!ctMap.has(code)) ctMap.set(code, []);
+    const _normCtKey = Object.keys(r).find(k => k.replace(/[^A-Z0-9]/gi, '').toUpperCase() === 'CTNO' || k.replace(/[^A-Z0-9]/gi, '').toUpperCase() === 'CONTAINERNO');
+    const ctNo = _normCtKey ? String(r[_normCtKey] || '').trim() : String(r['C/T No'] || r['C/T No.'] || r['Container No'] || '').trim();
+    ctMap.get(code).push({
+      qty: parseFloat(r['Quantity']) || 0,
+      ctNo: ctNo,
+      eta: formatDate(r['ETA'] || r['Port ETA']),
+      status: String(r['Status'] || '').trim()
+    });
+  });
+
+  return shortages.map(s => {
+    const partCode = String(s['Part Code'] || '').trim();
+    const normCode = ssNormCode(partCode);
+    const reqQty   = parseFloat(s['Shortage Quantity'] || s['Quantity'] || 0);
+
+    const allocInfo = allocMap.get(normCode) || { total: 0, locs: new Set() };
+    const whAlloc   = allocInfo.total;
+    const whLocs    = Array.from(allocInfo.locs).join(', ');
+    const remAfterWh = Math.max(0, reqQty - whAlloc);
+
+    const transitBatches = ctMap.get(normCode) || [];
+    const transitQty = transitBatches.reduce((acc, b) => acc + b.qty, 0);
+    const ctNos = [...new Set(transitBatches.map(b => b.ctNo).filter(Boolean))].join(', ');
+    const etas  = [...new Set(transitBatches.map(b => b.eta).filter(Boolean))].join(', ');
+    const stats = [...new Set(transitBatches.map(b => b.status).filter(Boolean))].join(', ');
+    const remAfterTransit = Math.max(0, remAfterWh - transitQty);
+
+    const blockedBatches = (blockedMap && (blockedMap.get(normCode) || blockedMap.get(partCode))) || [];
+    const blockedQty = blockedBatches.reduce((acc, b) => acc + b.qty, 0);
+    const blockedLocs = [...new Set(blockedBatches.map(b => b.location).filter(Boolean))].join(', ');
+
+    const absoluteShortage = Math.max(0, remAfterTransit);
+    let overallStatus = 'Absolute Shortage';
+    if (remAfterWh === 0) overallStatus = 'Covered by Warehouse';
+    else if (remAfterTransit === 0) overallStatus = 'Covered by Transit/Port';
+    else if (transitQty > 0) overallStatus = 'Partial Cover by Transit';
+
+    return {
+      'Part Code': partCode,
+      'Part Name': s['Part Name'] || '',
+      'Destination Location': s['Destination Location'] || '',
+      'Requested Date': s['Requested Date'] || '',
+      'Required Qty (Shortage)': reqQty,
+      '① Allocated from Warehouse': whAlloc,
+      '① Warehouse Locations': whLocs,
+      '① Remaining After Warehouse': remAfterWh,
+      '② In Transit / Port Qty': transitQty,
+      '② Container Nos': ctNos,
+      '② Port ETA': etas,
+      '② Transit Status': stats,
+      '② Remaining After Transit': remAfterTransit,
+      '③ Blocked Qty in Storage': blockedQty > 0 ? blockedQty : 0,
+      '③ Blocked Locations': blockedLocs,
+      '❌ Absolute Shortage': absoluteShortage,
+      'Status': overallStatus
+    };
+  });
+}
+
+function buildShortagePartRequestRows(shortages, inventory, containerRows) {
+  if (!shortages || shortages.length === 0) return [];
+  return shortages.map(s => ({
+    'Part Code': s['Part Code'] || '',
+    'Part Name': s['Part Name'] || '',
+    'Quantity': s['Shortage Quantity'] || s['Quantity'] || 0,
+    'Requested Date': s['Requested Date'] || '',
+    'Destination Location': s['Destination Location'] || '',
+    'Shortage Quantity': s['Shortage Quantity'] || s['Quantity'] || 0,
+    'Requested Quantity': s['Requested Quantity'] || s['Quantity'] || 0,
+    'Total Qty Available': s['Total Quantity Available'] || 0,
+    'Total Qty Allocated': s['Total Quantity Allocated'] || 0,
+    'Net Status': s['Net Status'] || '',
+    'In Transit Qty': s['In Transit Qty'] || '',
+    'Port ETA': s['Port ETA'] || '',
+    'Blocked Qty in Storage': s['Blocked Qty in Storage'] || '',
+    'Blocked Storage Location': s['Blocked Storage Locations'] || ''
+  }));
+}
+
+function buildPortTransitReport(shortages, containerRows, blockedMap) {
+  if (!shortages || shortages.length === 0) return [];
+  const results = [];
+
+  shortages.forEach(s => {
+    const partCode = String(s['Part Code'] || '').trim();
+    const normCode = ssNormCode(partCode);
+    const reqQty   = parseFloat(s['Shortage Quantity'] || s['Quantity'] || 0);
+
+    const ctMap = new Map();
+    (containerRows || []).forEach(r => {
+      const rawCode = String(r['Part No'] || r['Part Code'] || r['Material No.'] || r['Material No'] || '').trim();
+      if (!rawCode) return;
+      const code = ssNormCode(rawCode);
+      const status = String(r['Status'] || '').trim().toUpperCase();
+      if (!status.includes('TRANSIT') && !status.includes('PORT')) return;
+      if (!ctMap.has(code)) ctMap.set(code, []);
+      const _normCtKey = Object.keys(r).find(k => k.replace(/[^A-Z0-9]/gi, '').toUpperCase() === 'CTNO' || k.replace(/[^A-Z0-9]/gi, '').toUpperCase() === 'CONTAINERNO');
+      const ctNo = _normCtKey ? String(r[_normCtKey] || '').trim() : String(r['C/T No'] || r['C/T No.'] || r['Container No'] || '').trim();
+      ctMap.get(code).push({
+        qty: parseFloat(r['Quantity']) || 0,
+        ctNo: ctNo,
+        eta: formatDate(r['ETA'] || r['Port ETA']),
+        status: String(r['Status'] || '').trim()
+      });
+    });
+
+    const transitBatches = ctMap.get(normCode) || [];
+    const transitQty = transitBatches.reduce((acc, b) => acc + b.qty, 0);
+    const ctNos = [...new Set(transitBatches.map(b => b.ctNo).filter(Boolean))].join(', ');
+    const etas  = [...new Set(transitBatches.map(b => b.eta).filter(Boolean))].join(', ');
+    const stats = [...new Set(transitBatches.map(b => b.status).filter(Boolean))].join(', ');
+
+    const blockedBatches = (blockedMap && (blockedMap.get(normCode) || blockedMap.get(partCode))) || [];
+    const blockedQty = blockedBatches.reduce((acc, b) => acc + b.qty, 0);
+    const blockedLocs = [...new Set(blockedBatches.map(b => b.location).filter(Boolean))].join(', ');
+
+    if (transitQty > 0 || blockedQty > 0) {
+      results.push({
+        'Part Code': partCode,
+        'Part Name': s['Part Name'] || '',
+        'Quantity': reqQty,
+        'Requested Date': s['Requested Date'] || '',
+        'Destination Location': s['Destination Location'] || '',
+        'Container No.': ctNos || '—',
+        'In Transit Qty': transitQty > 0 ? transitQty : '—',
+        'Container Status': stats || '—',
+        'Port ETA': etas || '—',
+        'Blocked Qty': blockedQty > 0 ? blockedQty : '—',
+        'Blocked Storage Locations': blockedLocs || '—',
+        'Availability Status': transitQty >= reqQty ? 'Fully Covered by Transit' : transitQty > 0 ? 'Partially Covered by Transit' : 'Blocked Stock Only'
+      });
+    }
+  });
+
+  return results;
+}
+
 // ─── EXCEL EXPORT ─────────────────────────────────────────────
 function ssDownloadExcel() {
   try {
