@@ -278,8 +278,83 @@ function ssRenderResults() {
   document.getElementById('ss-tc-shortages').textContent = sCount.toLocaleString();
 
   // Render tables
-  renderTableRows('ss-tbody-fulfilled', Array.isArray(fulfilled) ? fulfilled : [], true, 'ss-footer-fulfilled');
-  renderTableRows('ss-tbody-shortages', Array.isArray(shortages) ? shortages : [], false, 'ss-footer-shortages');
+  ssRenderTable('fulfilled', fulfilled);
+  ssRenderTable('shortages', shortages);
+}
+
+function ssRenderTable(type, rows) {
+  const tbody  = document.getElementById(`ss-tbody-${type}`);
+  const footer = document.getElementById(`ss-footer-${type}`);
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  const list = Array.isArray(rows) ? rows : [];
+  const preview = list.slice(0, 500);
+
+  if (preview.length === 0) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td colspan="20" style="text-align:center;padding:32px;color:var(--grey-text)">No ${type} records.</td>`;
+    tbody.appendChild(tr);
+    if (footer) footer.textContent = '';
+    return;
+  }
+
+  if (type === 'fulfilled') {
+    preview.forEach(row => {
+      const tr = document.createElement('tr');
+      const status = row['Status'];
+      const statusBadge = status === 'Fulfilled'
+        ? `<span class="badge badge-green">✓ Fulfilled</span>`
+        : `<span class="badge badge-orange">⚠ Partial</span>`;
+      const srcBadge = row['Allocation Source'] === 'Inventory'
+        ? `<span class="source-badge source-inv">Inventory</span>`
+        : `<span class="source-badge source-cont">Container</span>`;
+
+      tr.innerHTML = `
+        <td><strong>${esc(row['Part Code'])}</strong></td>
+        <td>${esc(row['Part Name'])}</td>
+        <td>${fmt(row['Requested Quantity'])}</td>
+        <td>${esc(row['Requested Date'])}</td>
+        <td>${esc(row['Destination Location'])}</td>
+        <td>${srcBadge}</td>
+        <td>${esc(row['Pick Location'])}</td>
+        <td>${esc(row['Batch Order Date'])}</td>
+        <td style="font-weight:600;color:var(--green)">${fmt(row['Quantity Allocated From This Batch'])}</td>
+        <td>${fmt(row['Running Total Fulfilled'])}</td>
+        <td>${statusBadge}</td>
+        <td>${esc(row['Case No'])}</td>`;
+      tbody.appendChild(tr);
+    });
+  } else if (type === 'shortages') {
+    preview.forEach(row => {
+      const tr = document.createElement('tr');
+      const transitQty = row['In Transit Qty'] || '';
+      const blockedQty = row['Blocked Qty in Storage'];
+      const blockedLocs = row['Blocked Storage Locations'];
+      
+      tr.innerHTML = `
+        <td><strong>${esc(row['Part Code'])}</strong></td>
+        <td>${esc(row['Part Name'])}</td>
+        <td>${fmt(row['Requested Quantity'])}</td>
+        <td>${fmt(row['Total Quantity Allocated'])}</td>
+        <td style="font-weight:700;color:var(--red)">${fmt(row['Shortage Quantity'])}</td>
+        <td style="font-size:0.75rem;font-weight:600;color:var(--navy)">${esc(row['Net Status'])}</td>
+        <td>${esc(row['Container No.'])}</td>
+        <td style="font-weight:700;color:#2563EB">${fmt(transitQty)}</td>
+        <td>${esc(row['Container Status'])}</td>
+        <td>${esc(row['Port ETA'])}</td>
+        <td>${esc(row['Destination Location'])}</td>
+        <td style="font-weight:700;color:#D97706">${blockedQty ? fmt(blockedQty) : '—'}</td>
+        <td style="font-size:0.75rem;color:#92400E">${blockedLocs ? esc(blockedLocs) : '—'}</td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  if (footer) {
+    footer.textContent = list.length > 500
+      ? `Showing first 500 of ${list.length.toLocaleString()} rows. Download the Excel file for the full data.`
+      : `Showing all ${list.length.toLocaleString()} rows.`;
+  }
 }
 
 // ─── TAB SWITCHER ─────────────────────────────────────────────
