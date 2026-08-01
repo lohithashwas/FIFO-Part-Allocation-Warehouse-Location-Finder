@@ -69,6 +69,21 @@
         <span class="mode-btn-sub">2-file upload · Request vs Movement status</span>
       </div>
     </button>
+    <div class="mode-divider">OR</div>
+    <button class="mode-btn" id="mode-btn-ss" onclick="switchMode('ss')">
+      <div class="mode-btn-icon">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <rect x="3" y="4" width="22" height="20" rx="3" stroke="currentColor" stroke-width="2"/>
+          <path d="M8 10h12M8 14h8M8 18h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="22" cy="20" r="4" fill="#EF4444"/>
+          <path d="M20.5 20h3M22 18.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="mode-btn-text">
+        <span class="mode-btn-title">Shortage Statement</span>
+        <span class="mode-btn-sub">3-file upload · Plan shortage → FIFO allocation</span>
+      </div>
+    </button>
   </div>
 </div>
 
@@ -488,10 +503,254 @@
 
 </div><!-- end #section-movement -->
 
+
+<!-- ══════════════════════════════════════════════════
+     SECTION C — SHORTAGE STATEMENT
+     ══════════════════════════════════════════════════ -->
+<div id="section-ss" style="display:none;">
+
+  <!-- ── UPLOAD SECTION ── -->
+  <div class="section" id="ss-upload-section">
+    <div class="section-header">
+      <div class="section-label-badge" style="background:#7C3AED;">Section C — Shortage Statement</div>
+      <h2>Upload Plan &amp; Supply Files</h2>
+      <p>Upload your Production Plan file, Consolidated Inventory, and Container List. The engine allocates stock using FIFO rules across all warehouse locations.</p>
+    </div>
+    <div class="upload-grid">
+
+      <!-- Card 1: Plan File -->
+      <div class="upload-card" id="ss-card-plan">
+        <div class="upload-card-header">
+          <div class="upload-card-num" style="background:#7C3AED;">1</div>
+          <div class="upload-card-info">
+            <h3>Production Plan File</h3>
+            <p>Shortage Statement (e.g. Plan 01 08 2026.xlsx)</p>
+          </div>
+        </div>
+        <div class="drop-zone" id="ss-drop-plan" onclick="document.getElementById('ss-file-plan').click()">
+          <input type="file" id="ss-file-plan" accept=".xlsx" hidden>
+          <div class="dz-icon">
+            <svg width="32" height="32" viewBox="0 0 36 36" fill="none">
+              <rect x="6" y="4" width="24" height="28" rx="3" stroke="#0A1F44" stroke-width="2.5" opacity=".5"/>
+              <path d="M12 12h12M12 18h12M12 24h7" stroke="#0A1F44" stroke-width="2" opacity=".5"/>
+            </svg>
+          </div>
+          <p class="dz-text"><strong>Click to upload</strong> or drag &amp; drop</p>
+          <p class="dz-hint">Material No. · Description · Shortage Qty · Plant</p>
+        </div>
+        <div class="file-preview" id="ss-fp-plan">
+          <span class="fp-icon">✅</span>
+          <span class="fp-name" id="ss-fp-plan-name">—</span>
+          <span class="fp-rows" id="ss-fp-plan-rows"></span>
+          <button class="fp-remove" onclick="ssRemoveFile('plan')" title="Remove">✕</button>
+        </div>
+        <div class="card-error" id="ss-err-plan"></div>
+      </div>
+
+      <!-- Card 2: Consolidated Inventory -->
+      <div class="upload-card" id="ss-card-inventory">
+        <div class="upload-card-header">
+          <div class="upload-card-num">2</div>
+          <div class="upload-card-info">
+            <h3>Consolidated Inventory</h3>
+            <p>Warehouse stock — KD1, KD2, KD3, etc.</p>
+          </div>
+        </div>
+        <div class="drop-zone" id="ss-drop-inventory" onclick="document.getElementById('ss-file-inventory').click()">
+          <input type="file" id="ss-file-inventory" accept=".xlsx" hidden>
+          <div class="dz-icon">
+            <svg width="32" height="32" viewBox="0 0 36 36" fill="none">
+              <rect x="6" y="8" width="24" height="20" rx="2" stroke="#0A1F44" stroke-width="2.5" opacity=".5"/>
+              <path d="M6 14h24" stroke="#0A1F44" stroke-width="2" opacity=".5"/>
+            </svg>
+          </div>
+          <p class="dz-text"><strong>Click to upload</strong> or drag &amp; drop</p>
+          <p class="dz-hint">Part Code · Quantity · Order Date · Location</p>
+        </div>
+        <div class="file-preview" id="ss-fp-inventory">
+          <span class="fp-icon">✅</span>
+          <span class="fp-name" id="ss-fp-inventory-name">—</span>
+          <span class="fp-rows" id="ss-fp-inventory-rows"></span>
+          <button class="fp-remove" onclick="ssRemoveFile('inventory')" title="Remove">✕</button>
+        </div>
+        <div class="card-error" id="ss-err-inventory"></div>
+      </div>
+
+      <!-- Card 3: Container List -->
+      <div class="upload-card" id="ss-card-container">
+        <div class="upload-card-header">
+          <div class="upload-card-num">3</div>
+          <div class="upload-card-info">
+            <h3>Container List Case Details</h3>
+            <p>In-transit / Container Yard stock</p>
+          </div>
+        </div>
+        <div class="drop-zone" id="ss-drop-container" onclick="document.getElementById('ss-file-container').click()">
+          <input type="file" id="ss-file-container" accept=".xlsx" hidden>
+          <div class="dz-icon">
+            <svg width="32" height="32" viewBox="0 0 36 36" fill="none">
+              <rect x="4" y="10" width="28" height="18" rx="2" stroke="#0A1F44" stroke-width="2.5" opacity=".5"/>
+              <path d="M4 16h28" stroke="#0A1F44" stroke-width="2" opacity=".4"/>
+            </svg>
+          </div>
+          <p class="dz-text"><strong>Click to upload</strong> or drag &amp; drop</p>
+          <p class="dz-hint">Part No · Quantity · Order Date · C/T No</p>
+        </div>
+        <div class="file-preview" id="ss-fp-container">
+          <span class="fp-icon">✅</span>
+          <span class="fp-name" id="ss-fp-container-name">—</span>
+          <span class="fp-rows" id="ss-fp-container-rows"></span>
+          <button class="fp-remove" onclick="ssRemoveFile('container')" title="Remove">✕</button>
+        </div>
+        <div class="card-error" id="ss-err-container"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── ACTION BAR ── -->
+  <div class="action-bar">
+    <button class="btn btn-primary btn-lg" id="ss-process-btn" onclick="processSS()" disabled style="background:#7C3AED;border-color:#7C3AED;">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 9l4 4 8-8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Process Shortage Statement
+    </button>
+    <span id="ss-upload-status" style="font-size:.85rem;color:var(--grey-text)">Upload all 3 files to continue</span>
+  </div>
+
+  <!-- ── LOADING OVERLAY ── -->
+  <div class="loading-overlay" id="ss-loading-overlay" hidden>
+    <div class="loading-card">
+      <div class="spinner"></div>
+      <div class="loading-title">Processing Shortage Statement…</div>
+      <div class="loading-sub">Allocating inventory using FIFO engine rules</div>
+    </div>
+  </div>
+
+  <!-- ── RESULTS SECTION ── -->
+  <div class="results-section" id="ss-results-section" hidden>
+
+    <!-- Summary Stats Grid -->
+    <div class="summary-grid">
+      <div class="stat-card">
+        <div class="stat-label">Total Shortage Requests</div>
+        <div class="stat-value" id="ss-stat-total">—</div>
+      </div>
+      <div class="stat-card green">
+        <div class="stat-label">Fully Fulfilled</div>
+        <div class="stat-value" id="ss-stat-full">—</div>
+      </div>
+      <div class="stat-card red">
+        <div class="stat-label">Shortages Remaining</div>
+        <div class="stat-value" id="ss-stat-short">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Units Requested</div>
+        <div class="stat-value" id="ss-stat-units-req">—</div>
+      </div>
+      <div class="stat-card green">
+        <div class="stat-label">Units Allocated</div>
+        <div class="stat-value" id="ss-stat-units-alloc">—</div>
+      </div>
+      <div class="stat-card orange">
+        <div class="stat-label">Units Short</div>
+        <div class="stat-value" id="ss-stat-units-short">—</div>
+      </div>
+    </div>
+
+    <!-- Results Card with Tabs -->
+    <div class="results-card">
+      <div class="tabs">
+        <button class="tab-btn active" id="ss-tab-fulfilled" onclick="ssSwitchTab('fulfilled')">
+          ✅ Fulfilled Allocations
+          <span class="tab-count" id="ss-tc-fulfilled">0</span>
+        </button>
+        <button class="tab-btn" id="ss-tab-shortages" onclick="ssSwitchTab('shortages')">
+          ⚠️ Shortages &amp; In-Transit
+          <span class="tab-count" id="ss-tc-shortages">0</span>
+        </button>
+      </div>
+
+      <!-- Fulfilled Panel -->
+      <div class="tab-panel active" id="ss-panel-fulfilled">
+        <div class="table-wrapper">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Part Code</th>
+                <th>Part Name</th>
+                <th>Quantity</th>
+                <th>Requested Date</th>
+                <th>Destination Location</th>
+                <th>Pick Location</th>
+                <th>Batch Order Date</th>
+                <th>Allocated Qty</th>
+                <th>Status</th>
+                <th>Case No</th>
+              </tr>
+            </thead>
+            <tbody id="ss-tbody-fulfilled"></tbody>
+          </table>
+        </div>
+        <div class="table-footer" id="ss-footer-fulfilled"></div>
+      </div>
+
+      <!-- Shortages Panel -->
+      <div class="tab-panel" id="ss-panel-shortages">
+        <div class="table-wrapper">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Part Code</th>
+                <th>Part Name</th>
+                <th>Quantity</th>
+                <th>Requested Date</th>
+                <th>Destination Location</th>
+                <th>Shortage Qty</th>
+                <th>Net Status</th>
+                <th>Container No.</th>
+                <th>In Transit Qty</th>
+                <th>Container Status</th>
+                <th>Port ETA</th>
+                <th>Blocked Qty</th>
+              </tr>
+            </thead>
+            <tbody id="ss-tbody-shortages"></tbody>
+          </table>
+        </div>
+        <div class="table-footer" id="ss-footer-shortages"></div>
+      </div>
+    </div>
+
+    <!-- Download Bar -->
+    <div class="download-bar">
+      <div class="download-info">
+        <h3>Shortage Statement Reports Ready</h3>
+        <p>Full allocation report, Waterfall cascade, Port &amp; Transit details, and Pick Lists.</p>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn btn-outline" onclick="ssReset()">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 8a6 6 0 1 0 1.5-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M2 4v4h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          New Calculation
+        </button>
+        <button class="btn btn-success btn-lg" onclick="ssDownloadSSExcel()" style="background:#7C3AED;border-color:#7C3AED;">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 3v9M9 12L5 8M9 12L13 8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 15h12" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>
+          Download Excel Reports
+        </button>
+      </div>
+    </div>
+    <div id="ss-download-manager" style="display:none; margin-top:15px; padding-top:15px; border-top:1px solid #E2E8F0;">
+      <p style="font-weight:600; font-size:0.9rem; color:var(--navy); margin-bottom:10px;">Browser blocked multiple downloads? Click below to download files individually:</p>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;" id="ss-download-buttons"></div>
+    </div>
+  </div>
+
+</div><!-- end #section-ss -->
+
 <!-- Toast Container -->
 <div class="toast-container" id="toast-container"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="app.js"></script>
+<script src="ss_engine.js"></script>
 </body>
 </html>

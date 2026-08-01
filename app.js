@@ -29,19 +29,28 @@ const state = {
 function switchMode(mode) {
   const fifoEl  = document.getElementById('section-fifo');
   const mvEl    = document.getElementById('section-movement');
+  const ssEl    = document.getElementById('section-ss');
   const btnFifo = document.getElementById('mode-btn-fifo');
   const btnMv   = document.getElementById('mode-btn-movement');
+  const btnSs   = document.getElementById('mode-btn-ss');
+
+  if (fifoEl) fifoEl.style.display = 'none';
+  if (mvEl) mvEl.style.display   = 'none';
+  if (ssEl) ssEl.style.display   = 'none';
+
+  if (btnFifo) btnFifo.classList.remove('active');
+  if (btnMv) btnMv.classList.remove('active');
+  if (btnSs) btnSs.classList.remove('active');
 
   if (mode === 'fifo') {
-    fifoEl.style.display  = '';
-    mvEl.style.display    = 'none';
-    btnFifo.classList.add('active');
-    btnMv.classList.remove('active');
-  } else {
-    fifoEl.style.display  = 'none';
-    mvEl.style.display    = '';
-    btnMv.classList.add('active');
-    btnFifo.classList.remove('active');
+    if (fifoEl) fifoEl.style.display = '';
+    if (btnFifo) btnFifo.classList.add('active');
+  } else if (mode === 'movement') {
+    if (mvEl) mvEl.style.display = '';
+    if (btnMv) btnMv.classList.add('active');
+  } else if (mode === 'ss') {
+    if (ssEl) ssEl.style.display = '';
+    if (btnSs) btnSs.classList.add('active');
   }
 }
 
