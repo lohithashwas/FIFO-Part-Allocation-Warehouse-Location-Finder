@@ -709,26 +709,27 @@ function ssDownloadExcel() {
       );
     }, 400);
 
-    // Helper to group sub-locations into major warehouses (KD1, KD2, KD3, Container Yard, etc.)
+    // Helper to group sub-locations into major warehouses (KD1, KD2, KD3, Container Yard)
+    // Returns NULL for individual shelf bin codes (3B13, IM51, C05) so it doesn't create dozens of files
     const getMajorWarehouseLocation = (locStr) => {
-      if (!locStr) return 'INVENTORY';
+      if (!locStr) return null;
       const str = String(locStr).trim().toUpperCase();
       if (str.includes('KD1')) return 'KD1';
       if (str.includes('KD2')) return 'KD2';
       if (str.includes('KD3')) return 'KD3';
-      if (str.includes('CONTAINER')) return 'CONTAINER_YARD';
-      if (str.includes('INVENTORY')) return 'INVENTORY';
-      const clean = str.split(/[\s\-_,\.]/)[0];
-      return clean || 'INVENTORY';
+      if (str.includes('CONTAINER') || str.includes('YARD')) return 'CONTAINER_YARD';
+      return null;
     };
 
-    // FILE 3...N: Major Location Pick Lists (e.g. KD1, KD2, Container Yard)
+    // FILE 3...N: Major Location Pick Lists ONLY if explicitly KD1, KD2, KD3, or Container Yard
     const locationGroupMap = new Map();
     (ssState.results.fulfilled || []).forEach(r => {
-      const rawLoc = r['Pick Location'] || r['_sourceLoc'] || r['Allocation Source'] || 'INVENTORY';
+      const rawLoc = r['Allocation Source'] || r['_sourceLoc'] || r['Pick Location'] || '';
       const mainLoc = getMajorWarehouseLocation(rawLoc);
-      if (!locationGroupMap.has(mainLoc)) locationGroupMap.set(mainLoc, []);
-      locationGroupMap.get(mainLoc).push(r);
+      if (mainLoc) {
+        if (!locationGroupMap.has(mainLoc)) locationGroupMap.set(mainLoc, []);
+        locationGroupMap.get(mainLoc).push(r);
+      }
     });
 
     let delay = 700;
