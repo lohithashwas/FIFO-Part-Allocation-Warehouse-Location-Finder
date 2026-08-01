@@ -551,8 +551,12 @@ function ssDownloadExcel() {
     ];
 
     const shortagePri = [
+      'Part Code', 'Part Name', 'Requested Quantity', 'Shortage Quantity', 'Net Status',
+      'Container No.', 'In Transit Qty', 'Container Status', 'Port ETA',
+      'Blocked Qty in Storage', 'Blocked Storage Locations', 'Destination Location'
+    ];
+
     const btnContainer = document.getElementById('ss-download-buttons');
-    if (btnContainer) btnContainer.innerHTML = '';
     const mgr = document.getElementById('ss-download-manager');
     if (mgr) mgr.style.display = 'block';
 
