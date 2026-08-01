@@ -87,7 +87,7 @@ function ssHandleFile(type, file) {
 
           if (qty <= 0) return; // Only process actual shortages
 
-          // Find Requested Date
+          // Find Requested Date (Base date column)
           const dateKey = keys.find(k => k.match(/date/i));
           let reqDate = dateKey ? formatDate(row[dateKey]) : formatDate(new Date());
 
@@ -215,14 +215,14 @@ function processSS() {
       const fifoResults = runFIFO(ssState.data.planRequests, pool);
 
       // 3. Enrich shortage rows with transit & blocked stock info
-      const combinedShortages = buildCombinedShortages(fifoResults.shortages, ssState.data.containers, blockedMap);
+      const { combined: combinedShortages } = buildCombinedShortages(fifoResults.shortages, ssState.data.containers, blockedMap);
 
       // 4. Compute Summary Metrics
       const totalReqs       = ssState.data.planRequests.length;
       const totalUnitsReq   = ssState.data.planRequests.reduce((s, r) => s + (parseFloat(r['Quantity']) || 0), 0);
-      const totalUnitsAlloc = fifoResults.fulfilled.reduce((s, r) => s + (parseFloat(r['Quantity Allocated From This Batch']) || 0), 0);
-      const totalUnitsShort = fifoResults.shortages.reduce((s, r) => s + (parseFloat(r['Shortage Quantity']) || 0), 0);
-      const fulfilledFull   = ssState.data.planRequests.filter(r => !fifoResults.shortages.some(s => s._reqIdx === r._reqIdx)).length;
+      const totalUnitsAlloc = (fifoResults.fulfilled || []).reduce((s, r) => s + (parseFloat(r['Quantity Allocated From This Batch']) || 0), 0);
+      const totalUnitsShort = (fifoResults.shortages || []).reduce((s, r) => s + (parseFloat(r['Shortage Quantity']) || 0), 0);
+      const fulfilledFull   = ssState.data.planRequests.filter(r => !(fifoResults.shortages || []).some(s => s._reqIdx === r._reqIdx)).length;
       const shortageCount   = totalReqs - fulfilledFull;
 
       const summary = {
@@ -235,9 +235,9 @@ function processSS() {
       };
 
       ssState.results = {
-        fulfilled: fifoResults.fulfilled,
-        shortages: combinedShortages,
-        summary:   summary,
+        fulfilled:  fifoResults.fulfilled || [],
+        shortages:  combinedShortages || [],
+        summary:    summary,
         blockedMap: blockedMap
       };
 
@@ -260,23 +260,26 @@ function processSS() {
 
 // ─── RENDER RESULTS ───────────────────────────────────────────
 function ssRenderResults() {
-  const { fulfilled, shortages, summary } = ssState.results;
+  const { fulfilled = [], shortages = [], summary = {} } = ssState.results;
 
   // Stat cards
-  document.getElementById('ss-stat-total').textContent     = (summary.totalReqs || 0).toLocaleString();
-  document.getElementById('ss-stat-full').textContent      = (summary.fulfilledFull || 0).toLocaleString();
-  document.getElementById('ss-stat-short').textContent     = (summary.shortageCount || 0).toLocaleString();
+  document.getElementById('ss-stat-total').textContent       = (summary.totalReqs || 0).toLocaleString();
+  document.getElementById('ss-stat-full').textContent        = (summary.fulfilledFull || 0).toLocaleString();
+  document.getElementById('ss-stat-short').textContent       = (summary.shortageCount || 0).toLocaleString();
   document.getElementById('ss-stat-units-req').textContent   = (summary.totalUnitsReq || 0).toLocaleString();
   document.getElementById('ss-stat-units-alloc').textContent = (summary.totalUnitsAlloc || 0).toLocaleString();
   document.getElementById('ss-stat-units-short').textContent = (summary.totalUnitsShort || 0).toLocaleString();
 
   // Tab counts
-  document.getElementById('ss-tc-fulfilled').textContent = fulfilled.length.toLocaleString();
-  document.getElementById('ss-tc-shortages').textContent = shortages.length.toLocaleString();
+  const fCount = Array.isArray(fulfilled) ? fulfilled.length : 0;
+  const sCount = Array.isArray(shortages) ? shortages.length : 0;
+
+  document.getElementById('ss-tc-fulfilled').textContent = fCount.toLocaleString();
+  document.getElementById('ss-tc-shortages').textContent = sCount.toLocaleString();
 
   // Render tables
-  renderTableRows('ss-tbody-fulfilled', fulfilled, true, 'ss-footer-fulfilled');
-  renderTableRows('ss-tbody-shortages', shortages, false, 'ss-footer-shortages');
+  renderTableRows('ss-tbody-fulfilled', Array.isArray(fulfilled) ? fulfilled : [], true, 'ss-footer-fulfilled');
+  renderTableRows('ss-tbody-shortages', Array.isArray(shortages) ? shortages : [], false, 'ss-footer-shortages');
 }
 
 // ─── TAB SWITCHER ─────────────────────────────────────────────
@@ -354,7 +357,7 @@ function ssDownloadExcel() {
 
     // Part Master List for Shortages
     const partMasterMap = new Map();
-    ssState.results.shortages.forEach(r => {
+    (ssState.results.shortages || []).forEach(r => {
       const code = String(r['Part Code'] || '').trim();
       if (!code) return;
       if (!partMasterMap.has(code)) {

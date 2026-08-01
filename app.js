@@ -65,12 +65,24 @@ function parseExcelDate(val) {
   if (val == null || val === '') return new Date(0);
   if (val instanceof Date) return isNaN(val) ? new Date(0) : val;
   if (typeof val === 'number') {
+    const s = String(val);
+    if (s.length === 8) {
+      const y = parseInt(s.substring(0, 4), 10);
+      const m = parseInt(s.substring(4, 6), 10) - 1;
+      const d = parseInt(s.substring(6, 8), 10);
+      return new Date(y, m, d);
+    }
     // Excel serial date (days since 1899-12-30)
     return new Date((val - 25569) * 86400 * 1000);
   }
   if (typeof val === 'string') {
-    // "10-Jul-26" or "10-Jul-2026" or "2026-07-10"
     const cleaned = val.trim();
+    if (cleaned.length === 8 && /^\d{8}$/.test(cleaned)) {
+      const y = parseInt(cleaned.substring(0, 4), 10);
+      const m = parseInt(cleaned.substring(4, 6), 10) - 1;
+      const d = parseInt(cleaned.substring(6, 8), 10);
+      return new Date(y, m, d);
+    }
     // Try native parse first
     const d = new Date(cleaned);
     if (!isNaN(d)) return d;
