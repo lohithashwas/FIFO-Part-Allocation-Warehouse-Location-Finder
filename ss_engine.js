@@ -380,15 +380,26 @@ function ssSwitchTab(tab) {
 function buildFIFOWaterfallReport(shortages, fulfilled, containerRows, blockedMap) {
   if (!shortages || shortages.length === 0) return [];
 
-  const allocMap = new Map();
+  // Track warehouse allocations broken down by major locations (KD1, KD2, KD3, Container Yard)
+  const locAllocMap = new Map();
   (fulfilled || []).forEach(f => {
     const code = ssNormCode(f['Part Code']);
     if (!code) return;
-    if (!allocMap.has(code)) allocMap.set(code, { total: 0, locs: new Set() });
-    const entry = allocMap.get(code);
-    entry.total += (parseFloat(f['Quantity Allocated From This Batch']) || 0);
-    const loc = String(f['Pick Location'] || f['Destination Location'] || '').trim();
-    if (loc) entry.locs.add(loc);
+    if (!locAllocMap.has(code)) {
+      locAllocMap.set(code, { total: 0, kd1: 0, kd2: 0, kd3: 0, containerYard: 0, other: 0, locs: new Set() });
+    }
+    const entry = locAllocMap.get(code);
+    const qty = parseFloat(f['Quantity Allocated From This Batch']) || 0;
+    entry.total += qty;
+    
+    const locStr = String(f['Pick Location'] || f['Allocation Source'] || '').toUpperCase();
+    if (locStr.includes('KD1')) entry.kd1 += qty;
+    else if (locStr.includes('KD2')) entry.kd2 += qty;
+    else if (locStr.includes('KD3')) entry.kd3 += qty;
+    else if (locStr.includes('CONTAINER')) entry.containerYard += qty;
+    else entry.other += qty;
+
+    if (locStr) entry.locs.add(locStr);
   });
 
   const ctMap = new Map();
@@ -414,17 +425,24 @@ function buildFIFOWaterfallReport(shortages, fulfilled, containerRows, blockedMa
     const normCode = ssNormCode(partCode);
     const reqQty   = parseFloat(s['Shortage Quantity'] || s['Quantity'] || 0);
 
-    const allocInfo = allocMap.get(normCode) || { total: 0, locs: new Set() };
+    const allocInfo = locAllocMap.get(normCode) || { total: 0, kd1: 0, kd2: 0, kd3: 0, containerYard: 0, other: 0, locs: new Set() };
     const whAlloc   = allocInfo.total;
-    const whLocs    = Array.from(allocInfo.locs).join(', ');
     const remAfterWh = Math.max(0, reqQty - whAlloc);
 
     const transitBatches = ctMap.get(normCode) || [];
-    const transitQty = transitBatches.reduce((acc, b) => acc + b.qty, 0);
+    let inTransitQty = 0;
+    let portQty = 0;
+    transitBatches.forEach(b => {
+      const st = String(b.status).toUpperCase();
+      if (st.includes('PORT')) portQty += b.qty;
+      else inTransitQty += b.qty;
+    });
+
+    const totalTransitPort = inTransitQty + portQty;
     const ctNos = [...new Set(transitBatches.map(b => b.ctNo).filter(Boolean))].join(', ');
     const etas  = [...new Set(transitBatches.map(b => b.eta).filter(Boolean))].join(', ');
     const stats = [...new Set(transitBatches.map(b => b.status).filter(Boolean))].join(', ');
-    const remAfterTransit = Math.max(0, remAfterWh - transitQty);
+    const remAfterTransit = Math.max(0, remAfterWh - totalTransitPort);
 
     const blockedBatches = (blockedMap && (blockedMap.get(normCode) || blockedMap.get(partCode))) || [];
     const blockedQty = blockedBatches.reduce((acc, b) => acc + b.qty, 0);
@@ -434,25 +452,27 @@ function buildFIFOWaterfallReport(shortages, fulfilled, containerRows, blockedMa
     let overallStatus = 'Absolute Shortage';
     if (remAfterWh === 0) overallStatus = 'Covered by Warehouse';
     else if (remAfterTransit === 0) overallStatus = 'Covered by Transit/Port';
-    else if (transitQty > 0) overallStatus = 'Partial Cover by Transit';
+    else if (totalTransitPort > 0) overallStatus = 'Partial Cover by Transit';
 
     return {
       'Part Code': partCode,
       'Part Name': s['Part Name'] || '',
       'Destination Location': s['Destination Location'] || '',
       'Requested Date': s['Requested Date'] || '',
-      'Required Qty (Shortage)': reqQty,
-      '① Allocated from Warehouse': whAlloc,
-      '① Warehouse Locations': whLocs,
-      '① Remaining After Warehouse': remAfterWh,
-      '② In Transit / Port Qty': transitQty,
-      '② Container Nos': ctNos,
-      '② Port ETA': etas,
-      '② Transit Status': stats,
-      '② Remaining After Transit': remAfterTransit,
-      '③ Blocked Qty in Storage': blockedQty > 0 ? blockedQty : 0,
-      '③ Blocked Locations': blockedLocs,
-      '❌ Absolute Shortage': absoluteShortage,
+      'Required Demand Qty': reqQty,
+      'KD1 Allocated Qty': allocInfo.kd1,
+      'KD2 Allocated Qty': allocInfo.kd2,
+      'KD3 Allocated Qty': allocInfo.kd3,
+      'Container Yard Allocated Qty': allocInfo.containerYard,
+      'Total Warehouse Allocated Qty': whAlloc,
+      'In Transit Qty': inTransitQty,
+      'Port Qty': portQty,
+      'Container Nos': ctNos,
+      'Port ETA': etas,
+      'Transit Status': stats,
+      'Blocked Qty in Storage': blockedQty > 0 ? blockedQty : 0,
+      'Blocked Locations': blockedLocs,
+      'Absolute Shortage Qty': absoluteShortage,
       'Status': overallStatus
     };
   });
