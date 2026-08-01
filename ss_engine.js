@@ -392,11 +392,11 @@ function buildFIFOWaterfallReport(shortages, fulfilled, containerRows, blockedMa
     const qty = parseFloat(f['Quantity Allocated From This Batch']) || 0;
     entry.total += qty;
     
-    const locStr = String(f['Pick Location'] || f['Allocation Source'] || '').toUpperCase();
+    const locStr = String(f['_sourceLoc'] || f['Allocation Source'] || f['Pick Location'] || '').toUpperCase();
     if (locStr.includes('KD1')) entry.kd1 += qty;
     else if (locStr.includes('KD2')) entry.kd2 += qty;
     else if (locStr.includes('KD3')) entry.kd3 += qty;
-    else if (locStr.includes('CONTAINER')) entry.containerYard += qty;
+    else if (locStr.includes('CONTAINER') || locStr.includes('YARD')) entry.containerYard += qty;
     else entry.other += qty;
 
     if (locStr) entry.locs.add(locStr);
