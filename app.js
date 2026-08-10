@@ -354,6 +354,8 @@ function buildSupplyPool(inventoryRows, containerRows) {
     addBatch(code, {
       source:      'Container',
       orderDate:   parseExcelDate(row['Order Date']),
+      // Container Validity Date — used as tiebreaker for Container Yard rows when FIFO date is equal
+      containerValidityDate: parseExcelDate(row['Container Validity Date'] || row['Validity Date'] || row['Valid Till'] || row['Validity'] || ''),
       remaining:   qty,
       location:    physLoc,        // Container Location or 'Container Yard'
       pickLoc,
@@ -369,9 +371,42 @@ function buildSupplyPool(inventoryRows, containerRows) {
     });
   }
 
-  // Sort each part's batches by Order Date ASC (FIFO)
+  // ── FIFO Sort with tie-breaking rules ──────────────────────────────────────
+  // Priority 1 (Primary)  : FIFO Date (Order Date) — STRICTLY ascending
+  // Priority 2 (Tie-break): Location priority when FIFO dates are equal
+  //                          KD3 → KD2 → KD1 → Container Yard (last)
+  // Priority 3 (Tie-break): Container Validity Date ASC — only for Container Yard
+  //                          items that still share the same FIFO date
+  const locationPriority = (loc) => {
+    const l = String(loc).toUpperCase();
+    if (l.includes('KD3'))                              return 0; // Highest
+    if (l.includes('KD2'))                              return 1;
+    if (l.includes('KD1'))                              return 2;
+    if (l.includes('CONT') || l.includes('YARD'))       return 3; // Lowest
+    return 4; // Unknown / other
+  };
+
   for (const [, batches] of pool) {
-    batches.sort((a, b) => a.orderDate - b.orderDate);
+    batches.sort((a, b) => {
+      // 1. FIFO Date (Order Date) — strict ascending
+      const dateDiff = a.orderDate - b.orderDate;
+      if (dateDiff !== 0) return dateDiff;
+
+      // 2. Same FIFO date → location priority (KD3 first, Container Yard last)
+      const locDiff = locationPriority(a.location) - locationPriority(b.location);
+      if (locDiff !== 0) return locDiff;
+
+      // 3. Both are Container Yard with same FIFO date → use Container Validity Date ASC
+      const aIsYard = locationPriority(a.location) === 3;
+      const bIsYard = locationPriority(b.location) === 3;
+      if (aIsYard && bIsYard) {
+        const aValidity = a.containerValidityDate || new Date(0);
+        const bValidity = b.containerValidityDate || new Date(0);
+        return aValidity - bValidity;
+      }
+
+      return 0;
+    });
   }
   return { pool, blockedMap };
 }
